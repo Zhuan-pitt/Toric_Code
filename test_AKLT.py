@@ -57,5 +57,5 @@ if __name__ == "__main__":
     for i in range(L):
         check_eig(AKLT_chain,i)
         check_canonical(AKLT_chain,i)
-    print(AKLT_chain.B[0])
+
     print("Everything passed")
