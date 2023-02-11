@@ -84,8 +84,8 @@ class iMPS(object):
         
     def canonical(self):
         """ transform the iMPS into the canonical form: 
-        --G--s--G--s--
-          |     |       ,
+        . . . --G--s--G--s-- . . . 
+                |     |             ,
         where 
         --G--s--     --         --s--G--     --
           |     |  =   |  and  |     |  =   |
@@ -95,12 +95,12 @@ class iMPS(object):
             trans = self.transfer_matrix(site)
             lam,vr = linalg.eigs(trans,2)
             idx = lam.argsort()[::-1]
-            assert lam[idx[0]] != lam[idx[1]]
+            assert lam[idx[0]] != lam[idx[1]], 'nondegenerate state expected'
             vr = vr[:,idx[0]]
             
             lam,vl = linalg.eigs(trans.transpose(),2)
             idx = lam.argsort()[::-1]
-            assert lam[idx[0]] != lam[idx[1]]
+            assert lam[idx[0]] != lam[idx[1]], 'nondegenerate state expected'
             vl = vl[:,idx[0]]
             
             
