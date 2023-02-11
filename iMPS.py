@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.sparse.linalg import LinearOperator
-import contract 
+
 
 
 class iMPS(object):
@@ -26,18 +26,14 @@ class iMPS(object):
         assert self.chi.dtype == int or float
         assert self.d.dtype == int or float
         
-        for i in range(self.L):
+        
+        for i in range(self.L-1):
             assert isinstance(self.B[i], np.ndarray)
-            assert len(np.shape(self.B[i])) == 3
             assert self.B[i].dtype == self.dtype
-            #assert isinstance(self.s[i], np.ndarray)
-            if i >0:
-                assert np.shape(self.B[i])[0] == np.shape(self.B[i-1])[1] 
-                assert np.shape(self.B[i])[0] == self.chi[i]
-            else:
-                assert np.shape(self.B[i])[0] == np.shape(self.B[self.L-1])[1] 
+            
+            assert np.shape(self.B[i]) == ((self.chi[i],self.chi[i+1],self.d[i]))
+        assert np.shape(self.B[self.L-1]) == ((self.chi[self.L-1],self.chi[0],self.d[self.L-1]))
                 
-            assert np.shape(self.B[i])[2] == self.d[i]
             
             
         
@@ -61,27 +57,17 @@ class iMPS(object):
         Returns:
             tm: a instance of LinearOperator, transfer matrix at given site
         """
-        tensor = self.B[site]
+        tensor = self.B[site]        
+        def transfer_operator(v):
+            s = np.shape(tensor)
+            V = np.reshape(v,[s[1],s[1]])
+            M = np.tensordot(np.tensordot(tensor,V,([1],[0])),tensor.conj(),([1,2],[2,1]) )
+            return np.reshape(M,[s[1]*2,])
+        s = np.shape(tensor)
+        tm = LinearOperator([s[0]**2,s[1]**2],matvec = transfer_operator)
         
-        return self.transfer_matrix_class(tensor)
+        return tm
         
-    class  transfer_matrix_class(LinearOperator):
-            def __init__(self,tensor_at_bond):
-                s = np.shape(tensor_at_bond)
-                self.dtype = tensor_at_bond.dtype
-                self.shape = (s[0]**2,s[1]**2)
-                self.matvec = self.mv(tensor_at_bond)
-            
-            def mv(self,tensor):
-                def transfer_operator(v):
-                    s = np.shape(tensor)
-                    V = np.reshape(v,[s[1],s[1]])
-                    M = np.zeros_like(V)
-                    
-                    for i in range(s[2]):
-                        M += tensor[:,:,i]@V@tensor[:,:,i].transpose().conj()
-                    return np.reshape(M,[s[1]*2,])
-                return transfer_operator
 
     
 class iMPO:
@@ -107,19 +93,11 @@ class iMPO:
         assert self.chi.dtype == int or float
         assert self.d.dtype == int or float
         
-        for i in range(self.L):
+        for i in range(self.L-1):
             assert isinstance(self.B[i], np.ndarray)
-            assert len(np.shape(self.B[i])) == 4
             assert self.B[i].dtype == self.dtype
-            #assert isinstance(self.s[i], np.ndarray)
-            if i >0:
-                assert np.shape(self.B[i])[0] == np.shape(self.B[i-1])[1] 
-                assert np.shape(self.B[i])[0] == self.chi[i]
-            else:
-                assert np.shape(self.B[i])[0] == np.shape(self.B[self.L-1])[1] 
-                
-            assert np.shape(self.B[i])[2] == self.d[i]
-            assert np.shape(self.B[i])[3] == self.d[i]
+            assert np.shape(self.B[i]) == ((self.chi[i],self.chi[i+1],self.d[i],self.d[i]))
+        assert self.B[self.L-1].shape == ((self.chi[self.L-1],self.chi[0],self.d[self.L-1],self.d[self.L-1]))
             
             
             
