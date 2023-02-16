@@ -77,13 +77,54 @@ def col_contract343(T1,T2,T3):
     return T
 
 
+def sqrt_left_right(Ml,Mr,threshold=1e-14):
+    #XX^dag = Mr
+    #YY^dag = Ml
+    lamr,vr = np.linalg.eigh(Mr)
 
-def sqrthm(A):
+    idxr = lamr.argsort()[::-1]
+    if lamr[idxr[0]]<threshold and abs(lamr[idxr[-1]])>threshold:
+        lamr,vr = np.linalg.eigh(-Mr)
+        idxr = lamr.argsort()[::-1]
+
+    
+    laml,vl = np.linalg.eigh(Ml)
+    idxl = laml.argsort()[::-1]
+    if laml[idxl[0]]<threshold and abs(laml[idxl[-1]])>threshold:
+        laml,vl = np.linalg.eigh(-Ml)
+        idxl = laml.argsort()[::-1]
+
+    tot = lamr[idxr]*laml[idxl]
+
+    #print(lamr[idxr])
+    #print(laml[idxl])
+    
+    num = np.sum(tot>threshold**2)
+    assert num >0, print(lamr[idxr],lamr[idxl])
+    sqrtlamr = np.sqrt(lamr[idxr[0:num]])
+    X = vr[:,idxr[:num]]@np.diag(sqrtlamr)
+    
+    sqrtlaml = np.sqrt(laml[idxl[0:num]])
+    Y = vl[:,idxl[:num]]@np.diag(sqrtlaml)
+    assert num>0, 'positive eigenvalue expected '+f"lam = {lamr} "
+    return Y,X
+
+def sqrthm(A,threshold=1e-10):
     #sqrt of the hermitian matrix A
+    #discard the eigenvalues that smaller than threshold
     #XX^dag = A
+
     lam,vr = np.linalg.eigh(A)
-    sqrtlam = np.sqrt(abs(lam))
-    X = vr@np.diag(sqrtlam)@vr.transpose().conj()
+    idx = lam.argsort()[::-1]
+    if lam[idx[0]]<threshold and abs(lam[idx[-1]])>threshold:
+        lam,vr = np.linalg.eigh(-A)
+        idx = lam.argsort()[::-1]
+
+    
+    num = np.sum(lam[idx]>threshold)
+    sqrtlam = np.sqrt(lam[idx[0:num]])
+    X = vr[:,idx[:num]]@np.diag(sqrtlam)
+    assert num>0, 'positive eigenvalue expected '+f"lam = {lam} "
     return X
 
 
