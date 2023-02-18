@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.sparse.linalg import LinearOperator
 from scipy.sparse import linalg
+import scipy
 import funcs
 
 
@@ -17,7 +18,8 @@ class iMPS(object):
     """
     # (0)--T-- (1)
     #   (2)|   
-    
+    max_bond = 10
+    svd_threshold = 1e-10
     def check_consistency(self):
         L = self.L
         d = self.d
@@ -53,39 +55,45 @@ class iMPS(object):
             self.chi[i] = (self.B[i].shape)[0]
             self.d[i] = (self.B[i].shape)[2]
             self.s[i] = np.eye(self.chi[i])
-        self.canonical()
+        self.site_canonical()
         self.dtype = self.B[0].dtype  
         self.check_consistency()
     
         
-    def transfer_matrix(self,site=0):
+    def transfer_matrix(self):
         """
         Returns:
-            tm: a instance of LinearOperator, transfer matrix at given site
+            tm: a instance of LinearOperator, transfer matrix of the unit cell
         """
-        tensor = self.B[site] 
-        s = np.shape(tensor) 
         
-        if self.chi[site]>4:          
-            def mv(v):
-                V = np.reshape(v,[s[1],s[1]])
-                M = np.tensordot(np.tensordot(tensor,V,([1],[0])),tensor.conj(),([1,2],[2,1]) )
-                return np.reshape(M,[s[1]**2,])
-            def vm(v):
-                V = np.reshape(v,[s[0],s[0]])
-                M = np.tensordot(np.tensordot(tensor.conj(),V,([0],[0])),tensor,([1,2],[2,0]) )
-                return np.reshape(M,[s[1]**2,])
+        def single_matrix(site):
             
+        
+            tensor = self.B[site] 
+            s = np.shape(tensor) 
+            def mv(v):
+                    V = np.reshape(v,[s[1],s[1]])
+                    M = np.tensordot(np.tensordot(tensor,V,([1],[0])),tensor.conj(),([1,2],[2,1]) )
+                    return np.reshape(M,[s[0]**2,])
+            def vm(v):
+                    V = np.reshape(v,[s[0],s[0]])
+                    M = np.tensordot(np.tensordot(tensor.conj(),V,([0],[0])),tensor,([1,2],[2,0]) )
+                    return np.reshape(M,[s[1]**2,])
+                
             tm = LinearOperator([s[0]**2,s[1]**2],matvec = mv, rmatvec = vm)
-        else:
-            tm = funcs.col_contract33(tensor,tensor)
+            return tm
         
-        return tm
+        matrix = single_matrix(0)
+        for i in range(1,self.L):
+            matrix = matrix.dot(single_matrix(i))
+        
+        
+        return matrix
         
         
         
         
-    def gram_matrix(self,site,direction = 'right'):
+    def gram_matrix(self,direction = 'right'):
         """calculating the right/left gram matrix of the transfer matrix
         Args:
             site:  int, position of the transfer matrix
@@ -93,25 +101,32 @@ class iMPS(object):
         """
         assert direction == 'right' or 'left', 'right or left gram matrix expected'
         
-        trans = self.transfer_matrix(site)
+        trans = self.transfer_matrix()
+        
+        assert isinstance(trans,linalg.LinearOperator), 'wrong type'
+        shape = trans.shape
         if direction == 'right':
-            if isinstance(trans,linalg.LinearOperator):
+            if shape[0]>3:
                 lam,v = linalg.eigs(trans,2)
             else:
-                lam,v = np.linalg.eig(trans)
+                lam,v = scipy.linalg.eig(trans * np.identity(shape[0]))
+            
         if direction == 'left':
-            if isinstance(trans,linalg.LinearOperator):
+            if shape[0]>3:
                 lam,v = linalg.eigs(trans.adjoint(),2)
             else:
-                lam,v = np.linalg.eig(trans.conj().transpose())        
+                lam,v = scipy.linalg.eig(trans.adjoint() *  np.identity(shape[0])) 
                 
         
         idx = lam.argsort()[::-1]
-        self.B[site] = self.B[site]/np.sqrt(abs(lam[idx[0]]))
+        self.B[0] = self.B[0]/np.sqrt(abs(lam[idx[0]]))
         
         if len(idx)>=2:
             assert lam[idx[0]] != lam[idx[1]], 'nondegenerate state expected'
         v = v[:,idx[0]]
+        
+        v = v.reshape([self.chi[0]]*2)
+        assert funcs.is_hermitian_upto_a_phase(v), 'gram matrix should be hermitian'
         v = v+v.transpose().conj()
         v = v/np.linalg.norm(v)
         
@@ -119,7 +134,7 @@ class iMPS(object):
         
         
         
-    def canonical(self,max_bond=10,threshold=1e-10):
+    def cell_canonical(self,threshold=1e-10):
         """ transform the iMPS into the right canonical form: 
         . . . --G--G--- . . . 
                 |  |             ,
@@ -128,50 +143,122 @@ class iMPS(object):
           |   |  =   |  and  |     |  =   |
         --G---     --         --s--G--     -s- .
         """
-        for site in range(self.L):
-            
-            
-            
-            
-            vr = self.gram_matrix(site,'right')
-            vl = self.gram_matrix(site,'left')
-
-            
-            Mr = np.reshape(vr,[self.chi[site]]*2)
-            Ml = np.reshape(vl,[self.chi[site]]*2)
+        Mr = self.gram_matrix('right')
+        Ml = self.gram_matrix('left').conj()
             
             
 
-            X = funcs.sqrthm(Mr,threshold)
-            Y = funcs.sqrthm(Ml,threshold)
+        #X = funcs.sqrthm(Mr,threshold)
+        #Y = funcs.sqrthm(Ml,threshold)
             
+        Y,X = funcs.sqrt_left_right(Ml,Mr,self.s[0],max_bond = self.max_bond,threshold=self.svd_threshold,)
+            
+        U,s,V = np.linalg.svd(Y.transpose()@X)      
+            
+        dim = len(s)
+        assert dim >0, 'non-zero dimension expected'
 
             
-            U,s,V = np.linalg.svd(Y.transpose()@X)      
-            dim = np.sum(s>threshold)
+        U = U[:,:dim]
+        s = s[:dim]
+        V = V[:dim,:]
             
+        #s = s/np.linalg.norm(s)
             
-            assert dim >0, 'non-zero dimension expected'
-            dim = min(max_bond,dim)
+        self.B[0] = funcs.row_contract23(V@np.linalg.pinv(X),self.B[0])
+        self.B[-1] = funcs.row_contract32(self.B[-1], np.linalg.pinv(Y.transpose())@U@np.diag(s))
             
+         
+        self.chi[0] = dim
+        self.s[0] = np.diag(s)
+            
+    
+    
+    def site_canonical(self):
+        """generating the canonical form for each site"""
+        self.cell_canonical()
+        if self.L>=2:
+            """for i in range(self.L-2,-1,-1):
+                self.two_site_svd(i)
+                self.check_consistency()"""
+                
+            for i  in range(self.L-2,0):
+                self.single_site_svd(i,'right')
+                self.check_consistency()
+            self.single_site_svd(0,'left')
+            self.check_consistency()
+        
+    def single_site_svd(self,site,direction = 'right'):
+        """applying svd on tensor at site,
+        Args:
+            site: int, site for the tensor
+            direction: str, right or left canonical form
+        """
+        assert direction == 'right' or 'left', 'right or left gram matrix expected'
+        #the iMPS is in right canonical form, therefore, self.s at i corresponds to the self.B at i-1
+        s0 = self.s[site]
+        B1 = self.B[site]
+        
+        if direction =='right':
+            B1  = B1.reshape([self.chi[site],self.chi[(site+1)%self.L]*self.d[site]])
+        
+            U,s,V = np.linalg.svd(B1)
+            dim = len(s)
             U = U[:,:dim]
-            s = s[:dim]
+            V = V[:dim,:]
+            U1 = U@np.diag(s)
+            
+            self.chi[(site)%self.L] = dim
+            self.s[site] = np.diag(s)
+            self.B[(site-1)%self.L] = funcs.row_contract32(self.B[(site-1)%self.L],U1)
+            self.B[site] = V.reshape([dim,self.chi[(site+1)%self.L],self.d[site]])
+        
+        if direction == 'left':
+            
+            B1 = funcs.row_contract23(s0,B1)
+            
+            B1 = np.transpose(B1,[0,2,1])
+            B1  = B1.reshape([self.chi[site]*self.d[site],self.chi[(site+1)%self.L]])
+            
+            U,s,V = np.linalg.svd(B1)
+            dim = len(s)
+            U = U[:,:dim]
             V = V[:dim,:]
             
-            s = s/np.linalg.norm(s)
+            U1 = U@np.diag(s)
+            U1 = U1.reshape([self.chi[site],self.d[site],dim])
+            U1 = np.transpose(U1,[0,2,1])
             
-            G = funcs.row_contract23(V@np.linalg.pinv(X),self.B[site])
-            G = funcs.row_contract32(G, np.linalg.pinv(Y.transpose())@U@np.diag(s))
-            
-            self.B[site] = G
-            self.chi[site] = dim
-            self.s[site] = np.diag(s)
-            
-            assert self.L==1, 'need add code to deal with the case when unit cell larger than 1'
-            #if self.L>1:
-                
+            self.chi[(site+1)%self.L] = dim
+            self.s[site+1] = np.diag(s)
+            self.B[(site+1)%self.L] = funcs.row_contract23(V,self.B[(site+1)%self.L])
+            self.B[site] = funcs.row_contract23(np.linalg.inv(s0),U1)
+
         
+    def two_site_svd(self,site):
+        """applying svd on tensor pair at site and site+1,
+        Args:
+            site: int, site for the first tensor
+        """
+        #the iMPS is in right canonical form, therefore, self.s at i corresponds to the self.B at i-1
+        s0 = self.s[site]
+        B1 = self.B[site]
+        B2 = self.B[(site+1)%self.L]
+        merg_tensor = np.tensordot(funcs.row_contract23(s0,B1),B2,([1],[0]))
         
+        merg_matrix = merg_tensor.reshape([self.chi[site]*self.d[site],self.chi[(site+2)%self.L]*self.d[(site+1)%self.L]])
+        
+        U,s,V = np.linalg.svd(merg_matrix)
+        
+        dim = len(s)
+        V = V.reshape([dim,self.chi[(site+2)%self.L],self.d[(site+1)%self.L]])
+        self.B[(site+1)%self.L] = V
+        self.chi[(site+1)%self.L] = dim
+        
+        U1 = (U@np.diag(s)).reshape([self.chi[site],self.d[site],dim])
+        U1 = funcs.row_contract23(np.linalg.inv(s0),U1)
+        self.B[site] = np.transpose(U1,[0,2,1])
+        self.s[(site+1)%self.L] = np.diag(s)
     
 class iMPO:
     """
@@ -232,9 +319,10 @@ class MPS_power_method(object):
     """
     def __init__(self,MPS,MPO,max_bond):
         self.MPS = MPS
-        self.MPS.canonical()
+        self.MPS.site_canonical()
         self.MPO = MPO
         self.max_bond = max_bond
+        MPS.max_bond = max_bond
         self.E_history = []
         
     def update(self,site,loops):
@@ -243,7 +331,7 @@ class MPS_power_method(object):
             self.MPS.B[site] = B_new
             self.MPS.chi[site] = B_new.shape[0]
             self.MPS.s[site] = np.kron(self.MPS.s[site],np.eye(self.MPO.chi[0]))
-            self.MPS.canonical(self.max_bond)
+            self.MPS.site_canonical()
             self.MPS.check_consistency()
             self.calculate_eig()
             if self.check_converge():

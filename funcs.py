@@ -77,39 +77,54 @@ def col_contract343(T1,T2,T3):
     return T
 
 
-def sqrt_left_right(Ml,Mr,threshold=1e-14):
+def sqrt_left_right(Ml,Mr,s,max_bond = 10,threshold=1e-10):
     #XX^dag = Mr
     #YY^dag = Ml
+    
+    #truncate X and Y based on s
+    # Y--s--X
+    # |     |
+    # Y--s--X
+    
     lamr,vr = np.linalg.eigh(Mr)
 
     idxr = lamr.argsort()[::-1]
     if lamr[idxr[0]]<threshold and abs(lamr[idxr[-1]])>threshold:
         lamr,vr = np.linalg.eigh(-Mr)
         idxr = lamr.argsort()[::-1]
-
+    
+    assert lamr[idxr[-1]]+threshold >0, f'{lamr[idxr]}'
+    lamr_sqrt = np.sqrt(abs(lamr[idxr]))
+    vr = vr[:,idxr]
+    
     
     laml,vl = np.linalg.eigh(Ml)
     idxl = laml.argsort()[::-1]
     if laml[idxl[0]]<threshold and abs(laml[idxl[-1]])>threshold:
         laml,vl = np.linalg.eigh(-Ml)
         idxl = laml.argsort()[::-1]
-
-    tot = lamr[idxr]*laml[idxl]
-
-    #print(lamr[idxr])
-    #print(laml[idxl])
     
-    num = np.sum(tot>threshold**2)
-    assert num >0, print(lamr[idxr],lamr[idxl])
-    sqrtlamr = np.sqrt(lamr[idxr[0:num]])
-    X = vr[:,idxr[:num]]@np.diag(sqrtlamr)
+    assert laml[idxl[-1]]+threshold >0, f'{laml[idxl]}'
     
-    sqrtlaml = np.sqrt(laml[idxl[0:num]])
-    Y = vl[:,idxl[:num]]@np.diag(sqrtlaml)
-    assert num>0, 'positive eigenvalue expected '+f"lam = {lamr} "
+    laml_sqrt = np.sqrt(abs(laml[idxl]))
+    vl = vl[:,idxr]
+    
+    Y = vl@np.diag(laml_sqrt)
+    X = vr@np.diag(lamr_sqrt)
+    M_target = Y.transpose().conj()@s@X
+    
+    for i in range(1,max_bond):
+        for j in range(1,max_bond):
+            M = np.zeros_like(M_target)
+            M[:i,:j]  = M_target[:i,:j]
+            if np.linalg.norm(M-M_target)<threshold:
+                return Y[:,:i],X[:,:j]
+    
+    
+    #assert num>0, 'positive eigenvalue expected '+f"lam = {lamr} "
     return Y,X
 
-def sqrthm(A,threshold=1e-10):
+def sqrthm(A,threshold=1e-7):
     #sqrt of the hermitian matrix A
     #discard the eigenvalues that smaller than threshold
     #XX^dag = A
@@ -122,11 +137,39 @@ def sqrthm(A,threshold=1e-10):
 
     
     num = np.sum(lam[idx]>threshold)
+    #print(lam[idx],num)
     sqrtlam = np.sqrt(lam[idx[0:num]])
     X = vr[:,idx[:num]]@np.diag(sqrtlam)
     assert num>0, 'positive eigenvalue expected '+f"lam = {lam} "
     return X
 
+
+def find_phase(M):
+    s = M.shape
+    M_diag = max(np.diag(abs(M)))
+    for i in range(s[0]):
+        for j in range(i,s[1]):
+            if abs(M[i,j]) > 1e-10:
+                theta = (M[i,j]+M[j,i])
+                return theta
+def is_hermitian_upto_a_phase(M):
+    
+    s = M.shape
+    if s[0]!=s[1]:
+        return False
+        
+    norm = np.linalg.norm(M)
+    if norm<1e-10:
+        return True
+    
+    theta = find_phase(M)
+    
+    M = M/theta
+    norm = np.linalg.norm(M-M.transpose().conj())
+    if norm<1e-10:
+        return True
+    else:
+        return False                
 
 
 def delta_tensor(N,m):
