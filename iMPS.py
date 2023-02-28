@@ -28,19 +28,52 @@ class iMPS(object):
         assert len(self.d) == self.L
         assert isinstance(d, np.ndarray) and d.shape == (L,) 
         assert len(self.chi) == self.L
-        assert len(self.s) == self.L
-        
-        
-        
+        assert len(self.s) == self.L        
         for i in range(self.L):
             assert isinstance(self.B[i], np.ndarray)
             assert isinstance(self.s[i], np.ndarray)
             assert self.chi[i]>0
-            assert self.d[i]>0
-            
+            assert self.d[i]>0            
             assert np.shape(self.B[i]) == ((self.chi[i],self.chi[(i+1)%L],self.d[i]))
+
                 
-            
+    def check_canonical_unit_cell(self):
+        """
+        check the canonical form of the unit cell
+        """        
+        
+        trans = self.transfer_matrix()
+        vr = np.eye(self.chi[0])
+        vr = np.reshape(vr,[self.chi[0]**2,])
+        V = trans.dot(vr)
+        assert np.linalg.norm(V-vr*V[0]) <=1e-12, f'not right canonical, error = {np.linalg.norm(V-vr)}'
+
+
+        vl = self.s[0]@self.s[0].conj().transpose()
+        vl = np.reshape(vl,[self.chi[0]**2,])
+        V = trans.rmatvec(vl)
+        
+        assert np.linalg.norm(V-vl*V[0]/vl[0]) <=1e-12, f'not left canonical, error = {np.linalg.norm(V-vl)}'    
+    
+    def chcek_canonical_site(self):
+        for i in range(self.L-1,0,-1):
+            print(i)
+            gammaB = self.B[i]
+            transB = funcs.col_contract33(gammaB,gammaB)
+            vr = np.eye(self.chi[(i+1)%self.L])
+            vr = np.reshape(vr,[self.chi[(i+1)%self.L]**2,])
+            V = transB.dot(vr)
+            assert np.linalg.norm(V-vr*V[0]) <=1e-12, f'not right canonical, error = {np.linalg.norm(V-vr)}'
+
+        gammaA = self.B[0]
+        transA = funcs.col_contract33(gammaA,gammaA)
+        vl = self.s[0]@self.s[0].conj().transpose()
+        vl = np.reshape(vl,[self.chi[0]**2,])
+        V = vl@transA
+        
+        vl2 = self.s[1%self.L]@self.s[1%self.L].conj().transpose()
+        vl2 = np.reshape(vl2,[self.chi[1%self.L]**2,])
+        assert np.linalg.norm(V-vl2*V[0]/vl2[0]) <=1e-12, f'not left canonical, error = {np.linalg.norm(V-vr)}'
             
         
     def construct_from_tensor_list(self,tensor_list):
@@ -58,6 +91,8 @@ class iMPS(object):
         self.site_canonical()
         self.dtype = self.B[0].dtype  
         self.check_consistency()
+        self.check_canonical_unit_cell()
+        self.chcek_canonical_site()
     
         
     def transfer_matrix(self):
@@ -86,8 +121,7 @@ class iMPS(object):
         matrix = single_matrix(0)
         for i in range(1,self.L):
             matrix = matrix.dot(single_matrix(i))
-        
-        
+                
         return matrix
         
         
@@ -171,9 +205,7 @@ class iMPS(object):
          
         self.chi[0] = dim
         self.s[0] = np.diag(s)
-            
-    
-    
+                
     def site_canonical(self):
         """generating the canonical form for each site"""
         self.cell_canonical()
@@ -182,11 +214,13 @@ class iMPS(object):
                 self.two_site_svd(i)
                 self.check_consistency()"""
                 
-            for i  in range(self.L-2,0):
+            for i  in range(self.L-1,0,-1):
                 self.single_site_svd(i,'right')
                 self.check_consistency()
             self.single_site_svd(0,'left')
             self.check_consistency()
+
+
         
     def single_site_svd(self,site,direction = 'right'):
         """applying svd on tensor at site,
@@ -259,6 +293,8 @@ class iMPS(object):
         U1 = funcs.row_contract23(np.linalg.inv(s0),U1)
         self.B[site] = np.transpose(U1,[0,2,1])
         self.s[(site+1)%self.L] = np.diag(s)
+
+
     
 class iMPO:
     """
