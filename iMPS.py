@@ -56,25 +56,24 @@ class iMPS(object):
         assert np.linalg.norm(V-vl*V[0]/vl[0]) <=1e-12, f'not left canonical, error = {np.linalg.norm(V-vl)}'    
     
     def chcek_canonical_site(self):
-        for i in range(self.L-1,0,-1):
-            print(i)
+        for i in range(self.L-1,-1,-1):
             gammaB = self.B[i]
             transB = funcs.col_contract33(gammaB,gammaB)
             vr = np.eye(self.chi[(i+1)%self.L])
             vr = np.reshape(vr,[self.chi[(i+1)%self.L]**2,])
             V = transB.dot(vr)
-            assert np.linalg.norm(V-vr*V[0]) <=1e-12, f'not right canonical, error = {np.linalg.norm(V-vr)}'
-
-        gammaA = self.B[0]
-        transA = funcs.col_contract33(gammaA,gammaA)
-        vl = self.s[0]@self.s[0].conj().transpose()
-        vl = np.reshape(vl,[self.chi[0]**2,])
-        V = vl@transA
-        
-        vl2 = self.s[1%self.L]@self.s[1%self.L].conj().transpose()
-        vl2 = np.reshape(vl2,[self.chi[1%self.L]**2,])
-        assert np.linalg.norm(V-vl2*V[0]/vl2[0]) <=1e-12, f'not left canonical, error = {np.linalg.norm(V-vr)}'
+            assert np.linalg.norm(V-vr*V[0]) <=1e-12, f'not right canonical, error = {np.linalg.norm(V-vr)}, site = {i}'
+        for i in range(0,self.L):
+            gammaA = self.B[i]
+            transA = funcs.col_contract33(gammaA,gammaA)
+            vl = self.s[i]@self.s[i].conj().transpose()
+            vl = np.reshape(vl,[self.chi[i]**2,])
+            V = vl@transA
             
+            vl2 = self.s[(i+1)%self.L]@self.s[(i+1)%self.L].conj().transpose()
+            vl2 = np.reshape(vl2,[self.chi[(i+1)%self.L]**2,])
+            assert np.linalg.norm(V-vl2*V[0]/vl2[0]) <=1e-12, f'not left canonical, error = {np.linalg.norm(V-vr)}, site = {i}'
+                
         
     def construct_from_tensor_list(self,tensor_list):
         self.B=[]
@@ -88,6 +87,7 @@ class iMPS(object):
             self.chi[i] = (self.B[i].shape)[0]
             self.d[i] = (self.B[i].shape)[2]
             self.s[i] = np.eye(self.chi[i])
+        self.init_norm = self.calculate_norm()
         self.site_canonical()
         self.dtype = self.B[0].dtype  
         self.check_consistency()
@@ -153,22 +153,41 @@ class iMPS(object):
                 
         
         idx = lam.argsort()[::-1]
-        self.B[0] = self.B[0]/np.sqrt(abs(lam[idx[0]]))
+        
         
         if len(idx)>=2:
             assert lam[idx[0]] != lam[idx[1]], 'nondegenerate state expected'
         v = v[:,idx[0]]
         
         v = v.reshape([self.chi[0]]*2)
-        assert funcs.is_hermitian_upto_a_phase(v), 'gram matrix should be hermitian'
+        assert funcs.is_hermitian_upto_a_phase(v), print(repr(v))#'gram matrix should be hermitian'
         v = v+v.transpose().conj()
         v = v/np.linalg.norm(v)
-        
+        v = v/np.sign(np.sum(v))
         return v
         
+    def normalize(self):
+        norm = self.calculate_norm()
+        for i in range(self.L):
+            self.B[i] = self.B[i]/(norm**(1/self.L)) 
+    
+    
+    def calculate_norm(self):
+        trans = self.transfer_matrix()
         
+        assert isinstance(trans,linalg.LinearOperator), 'wrong type'
+        shape = trans.shape
+        if shape[0]>3:
+                lam,v = linalg.eigs(trans,2)
+        else:
+                lam,v = scipy.linalg.eig(trans * np.identity(shape[0]))
+            
         
-    def cell_canonical(self,threshold=1e-10):
+        idx = lam.argsort()[::-1]
+        
+        return np.sqrt(abs(lam[idx[0]]))
+        
+    def cell_canonical(self,threshold=1e-12):
         """ transform the iMPS into the right canonical form: 
         . . . --G--G--- . . . 
                 |  |             ,
@@ -180,12 +199,11 @@ class iMPS(object):
         Mr = self.gram_matrix('right')
         Ml = self.gram_matrix('left').conj()
             
+        self.normalize()
+        X = funcs.sqrthm(Mr,threshold)
+        Y = funcs.sqrthm(Ml,threshold)
             
-
-        #X = funcs.sqrthm(Mr,threshold)
-        #Y = funcs.sqrthm(Ml,threshold)
-            
-        Y,X = funcs.sqrt_left_right(Ml,Mr,self.s[0],max_bond = self.max_bond,threshold=self.svd_threshold,)
+        #Y,X = funcs.sqrt_left_right(Ml,Mr,self.s[0],max_bond = self.max_bond,threshold=threshold)
             
         U,s,V = np.linalg.svd(Y.transpose()@X)      
             
@@ -206,9 +224,9 @@ class iMPS(object):
         self.chi[0] = dim
         self.s[0] = np.diag(s)
                 
-    def site_canonical(self):
+    def site_canonical(self,threshold = 1e-12):
         """generating the canonical form for each site"""
-        self.cell_canonical()
+        self.cell_canonical(threshold)
         if self.L>=2:
             """for i in range(self.L-2,-1,-1):
                 self.two_site_svd(i)
@@ -217,8 +235,13 @@ class iMPS(object):
             for i  in range(self.L-1,0,-1):
                 self.single_site_svd(i,'right')
                 self.check_consistency()
-            self.single_site_svd(0,'left')
-            self.check_consistency()
+                
+            for i  in range(0,self.L-1):
+                self.single_site_svd(i,'left')
+                self.check_consistency()  
+                
+        self.normalize()
+
 
 
         
@@ -264,7 +287,7 @@ class iMPS(object):
             U1 = np.transpose(U1,[0,2,1])
             
             self.chi[(site+1)%self.L] = dim
-            self.s[site+1] = np.diag(s)
+            self.s[(site+1)%self.L] = np.diag(s)
             self.B[(site+1)%self.L] = funcs.row_contract23(V,self.B[(site+1)%self.L])
             self.B[site] = funcs.row_contract23(np.linalg.inv(s0),U1)
 
@@ -355,6 +378,7 @@ class MPS_power_method(object):
     """
     def __init__(self,MPS,MPO,max_bond):
         self.MPS = MPS
+        self.MPS.svd_threshold = 1e-12
         self.MPS.site_canonical()
         self.MPO = MPO
         self.max_bond = max_bond
@@ -367,9 +391,11 @@ class MPS_power_method(object):
             self.MPS.B[site] = B_new
             self.MPS.chi[site] = B_new.shape[0]
             self.MPS.s[site] = np.kron(self.MPS.s[site],np.eye(self.MPO.chi[0]))
-            self.MPS.site_canonical()
+            self.E_history.append(self.MPS.calculate_norm())
+            self.MPS.site_canonical(self.MPS.svd_threshold)
+            
             self.MPS.check_consistency()
-            self.calculate_eig()
+            #self.calculate_eig()
             if self.check_converge():
                 return 
             
@@ -406,10 +432,48 @@ class MPS_power_method(object):
         
         self.E_history.append(E/norm)
         
-    def check_converge(self,threshold=1e-4,loop=10):
+    def check_converge(self,threshold=1e-5,loop=10):
         if len(self.E_history)>loop+1:
             E_average = np.mean(self.E_history[-loop-1:-1])
             if abs(E_average-self.E_history[-1])<threshold:
                 return True
             else: return False
         else: return False
+        
+        
+class strap(object):
+    
+    
+    def __init__(self,MPS1,MPO,MPS2):
+        self.MPS1 = MPS1
+        self.MPO = MPO
+        self.MPS2 = MPS2
+    
+    def calculate_eig(self):
+        
+        s1 = np.shape(self.MPS1.B[0])  
+        s2 = np.shape(self.MPO.B[0])     
+        s3 = np.shape(self.MPS2.B[0])  
+        site = 0
+        if self.MPS1.chi[site] >4:
+            def mv(v):
+                V = np.reshape(v,[s1[1],s2[1],s3[1]])
+                M = np.tensordot(self.MPS1.B[site],V,([1],[0]))
+                M = np.tensordot(M,self.MPO.B[site],([2,1],[1,2]))
+                M = np.tensordot(M,self.MPS2.B[site].conj(),([3,1],[2,1]))
+                
+                return np.reshape(M,[s1[1]*s2[1]*s3[1],])
+            
+            trans = LinearOperator([s1[1]*s2[1]*s3[1]]*2,matvec = mv)
+            E,_ = linalg.eigs(trans,1)
+            idx = E.argsort()[::-1]
+            E = E[idx[0]]
+
+        else:
+            trans = funcs.col_contract343(self.MPS1.B[site],self.MPO.B[site],self.MPS2.B[site])
+            E = np.linalg.eigvals(trans)
+            
+            idx = E.argsort()[::-1]
+            E = E[idx[0]]
+
+        return E
