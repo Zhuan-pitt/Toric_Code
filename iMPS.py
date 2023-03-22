@@ -432,7 +432,7 @@ class MPS_power_method(object):
         
         self.E_history.append(E/norm)
         
-    def check_converge(self,threshold=1e-5,loop=10):
+    def check_converge(self,threshold=1e-3,loop=10):
         if len(self.E_history)>loop+1:
             E_average = np.mean(self.E_history[-loop-1:-1])
             if abs(E_average-self.E_history[-1])<threshold:
