@@ -243,3 +243,88 @@ def single_T(h1,h2,u1="I",u2="I"):
     dA3 = np.transpose(dA3,[0,4,1,5,2,6,3,7])
     dA3 = np.reshape(dA3,[4,4,4,4])
     return dA3
+
+
+def single_trans_dephasing(p):
+    
+    A = delta_tensor(4,2)
+    
+    P = np.zeros([2,2,2])
+    P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
+    
+    
+    M = np.zeros([2,2,3])
+    M[:,:,0] = np.eye(2)*np.sqrt(1-p)
+    M[:,:,1] = np.array([[np.sqrt(p),0],[0,0]])
+    M[:,:,2] = np.array([[0,0],[0,np.sqrt(p)]])
+    
+    dM = np.tensordot(M,M,([1,2],[1,2]))
+    
+    ddM = np.kron(dM,dM)
+    ddM = ddM.reshape([4,4])
+
+    A3 = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
+    A3 = np.transpose(A3,[0,2,3,4,1,5])
+    A3 = np.reshape(A3,[2,2,2,2,4])
+    
+    A3 = np.tensordot(A3,ddM,([4],[0]))
+ 
+
+    A3s = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
+    A3s = np.transpose(A3s,[0,2,3,4,1,5])
+    A3s = np.reshape(A3s,[2,2,2,2,4])
+    
+    dA3 = np.tensordot(A3,A3s,([4],[4]))
+    dA3 = np.transpose(dA3,[0,4,1,5,2,6,3,7])
+    dA3 = np.reshape(dA3,[4,4,4,4])
+    return dA3
+
+
+def single_T_dephasing(p,u1="I",u2="I"):
+    
+    A = delta_tensor(4,2)
+    
+    P = np.zeros([2,2,2])
+    P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
+    
+    M = np.zeros([2,2,3])
+    M[:,:,0] = np.eye(2)*np.sqrt(1-p)
+    M[:,:,1] = np.array([[np.sqrt(p),0],[0,0]])
+    M[:,:,2] = np.array([[0,0],[0,np.sqrt(p)]])
+    
+    dM = np.tensordot(M,M,([1,2],[1,2]))
+    
+    matrix_list={"I":np.eye(2),"X":np.matrix([[0,1],[1,0]])} 
+    u1 = matrix_list[u1]
+    u2 = matrix_list[u2]
+
+    A3 = np.tensordot(P,A,([1],[0]))
+    A3 = np.transpose(A3,[1,0,2,3,4])
+    A3 = np.reshape(A3,[2,2,2,2,2])
+    A3 = np.tensordot(dM,A3,([1],[0]))
+    
+    A31 = np.tensordot(A3,u1,([4],[0]))
+    A32 = np.tensordot(A3,u2,([4],[0]))
+    dA3 = np.tensordot(A31,A32,([0],[0]))
+    dA3 = np.transpose(dA3,[0,4,1,5,2,6,3,7])
+    dA3 = np.reshape(dA3,[4,4,4,4])
+    return dA3
+
+
+def simplify_trans(T):
+    s = T.shape
+    T1 = T.reshape([s[0],s[1]*s[2]*s[3]])
+    
+    U1,S1,V1 = np.linalg.svd(T1)
+    dim = np.sum(S1>1e-10)
+    print(S1)
+    U1 = U1[:,:dim]
+    S1 = np.diag(S1[:dim])
+    V1 = V1[:dim,:]
+    
+    T2 = S1@V1
+    T2 = T2.reshape([dim,s[1],s[2],s[3]])
+    
+    T2 = np.tensordot(T2,U1,([1],[0]))
+    T2 = np.transpose(T2,[0,3,1,2])
+    return T2

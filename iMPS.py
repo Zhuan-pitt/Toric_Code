@@ -233,11 +233,11 @@ class iMPS(object):
                 self.check_consistency()"""
                 
             for i  in range(self.L-1,0,-1):
-                self.single_site_svd(i,'right')
+                self.single_site_svd(i,'right',threshold =threshold )
                 self.check_consistency()
                 
             for i  in range(0,self.L-1):
-                self.single_site_svd(i,'left')
+                self.single_site_svd(i,'left',threshold )
                 self.check_consistency()  
                 
         self.normalize()
@@ -245,7 +245,7 @@ class iMPS(object):
 
 
         
-    def single_site_svd(self,site,direction = 'right'):
+    def single_site_svd(self,site,direction = 'right',threshold = 1e-12):
         """applying svd on tensor at site,
         Args:
             site: int, site for the tensor
@@ -260,9 +260,10 @@ class iMPS(object):
             B1  = B1.reshape([self.chi[site],self.chi[(site+1)%self.L]*self.d[site]])
         
             U,s,V = np.linalg.svd(B1)
-            dim = len(s)
+            dim = np.sum(s>threshold)
             U = U[:,:dim]
             V = V[:dim,:]
+            s = s[:dim]
             U1 = U@np.diag(s)
             
             self.chi[(site)%self.L] = dim
@@ -278,10 +279,12 @@ class iMPS(object):
             B1  = B1.reshape([self.chi[site]*self.d[site],self.chi[(site+1)%self.L]])
             
             U,s,V = np.linalg.svd(B1)
-            dim = len(s)
+            
+            
+            dim = np.sum(s>threshold)
             U = U[:,:dim]
             V = V[:dim,:]
-            
+            s = s[:dim]
             U1 = U@np.diag(s)
             U1 = U1.reshape([self.chi[site],self.d[site],dim])
             U1 = np.transpose(U1,[0,2,1])
@@ -385,12 +388,13 @@ class MPS_power_method(object):
         MPS.max_bond = max_bond
         self.E_history = []
         
-    def update(self,site,loops):
+    def update(self,loops):
         for _ in range(loops):
-            B_new = funcs.col_contract34(self.MPS.B[site],self.MPO.B[site])
-            self.MPS.B[site] = B_new
-            self.MPS.chi[site] = B_new.shape[0]
-            self.MPS.s[site] = np.kron(self.MPS.s[site],np.eye(self.MPO.chi[0]))
+            for site in range(self.MPS.L):
+                B_new = funcs.col_contract34(self.MPS.B[site],self.MPO.B[site])
+                self.MPS.B[site] = B_new
+                self.MPS.chi[site] = B_new.shape[0]
+                self.MPS.s[site] = np.kron(self.MPS.s[site],np.eye(self.MPO.chi[site]))
             self.E_history.append(self.MPS.calculate_norm())
             self.MPS.site_canonical(self.MPS.svd_threshold)
             
@@ -399,39 +403,6 @@ class MPS_power_method(object):
             if self.check_converge():
                 return 
             
-        
-    def calculate_eig(self):
-        
-        s1 = np.shape(self.MPS.B[0])  
-        s2 = np.shape(self.MPO.B[0])     
-             
-        site = 0
-        if self.MPS.chi[site] >4:
-            def mv(v):
-                V = np.reshape(v,[s1[1],s2[1],s1[1]])
-                M = np.tensordot(self.MPS.B[site],V,([1],[0]))
-                M = np.tensordot(M,self.MPO.B[site],([2,1],[1,2]))
-                M = np.tensordot(M,self.MPS.B[site].conj(),([3,1],[2,1]))
-                
-                return np.reshape(M,[s1[1]**2*s2[1],])
-            
-            trans = LinearOperator([s1[1]**2*s2[1]]*2,matvec = mv)
-            E,_ = linalg.eigs(trans,1)
-            idx = E.argsort()[::-1]
-            E = E[idx[0]]
-
-        else:
-            trans = funcs.col_contract343(self.MPS.B[site],self.MPO.B[site],self.MPS.B[site])
-            E = np.linalg.eigvals(trans)
-            
-            idx = E.argsort()[::-1]
-            E = E[idx[0]]
-
-        norm = np.linalg.norm(self.MPS.s[site])**2
-
-        
-        self.E_history.append(E/norm)
-        
     def check_converge(self,threshold=1e-3,loop=10):
         if len(self.E_history)>loop+1:
             E_average = np.mean(self.E_history[-loop-1:-1])
@@ -448,32 +419,57 @@ class strap(object):
         self.MPS1 = MPS1
         self.MPO = MPO
         self.MPS2 = MPS2
+        self.check_consistency()
+        
+    def check_consistency(self):
+        self.MPS1.L = self.MPS2.L
+        self.MPS1.L = self.MPO.L
+
+
+
+    def transfer_matrix(self):
+        """
+        Returns:
+            tm: a instance of LinearOperator, transfer matrix of the unit cell
+        """
+        
+        def single_matrix(site):
+            
+        
+            bra = self.MPS1.B[site] 
+            ket = self.MPS2.B[site]
+            ope = self.MPO.B[site]
+            s1 = np.shape(bra) 
+            s2 = np.shape(ope) 
+            s3 = np.shape(ket) 
+            def mv(v):
+                    V = np.reshape(v,[s1[1],s2[1],s3[1]])
+                    M = np.tensordot(bra,V,([1],[0]))
+                    M = np.tensordot(M,ope,([2,1],[1,2]))
+                    M = np.tensordot(M,ket.conj(),([3,1],[2,1]))
+                    
+                    return np.reshape(M,[s1[0]*s2[0]*s3[0],])
+
+                
+            tm = LinearOperator([s1[0]*s2[0]*s3[0],s1[1]*s2[1]*s3[1]],matvec = mv)
+            return tm
+        
+        matrix = single_matrix(0)
+        for i in range(1,self.MPS1.L):
+            matrix = matrix.dot(single_matrix(i))
+                
+        return matrix
+    
+    
     
     def calculate_eig(self):
         
-        s1 = np.shape(self.MPS1.B[0])  
-        s2 = np.shape(self.MPO.B[0])     
-        s3 = np.shape(self.MPS2.B[0])  
-        site = 0
-        if self.MPS1.chi[site] >4:
-            def mv(v):
-                V = np.reshape(v,[s1[1],s2[1],s3[1]])
-                M = np.tensordot(self.MPS1.B[site],V,([1],[0]))
-                M = np.tensordot(M,self.MPO.B[site],([2,1],[1,2]))
-                M = np.tensordot(M,self.MPS2.B[site].conj(),([3,1],[2,1]))
-                
-                return np.reshape(M,[s1[1]*s2[1]*s3[1],])
-            
-            trans = LinearOperator([s1[1]*s2[1]*s3[1]]*2,matvec = mv)
+        trans = self.transfer_matrix()
+        if trans.shape[0]>2:
             E,_ = linalg.eigs(trans,1)
-            idx = E.argsort()[::-1]
-            E = E[idx[0]]
-
         else:
-            trans = funcs.col_contract343(self.MPS1.B[site],self.MPO.B[site],self.MPS2.B[site])
-            E = np.linalg.eigvals(trans)
-            
-            idx = E.argsort()[::-1]
-            E = E[idx[0]]
+            E,_ = scipy.linalg.eig(trans * np.identity(trans.shape[0]))
+        idx = E.argsort()[::-1]
+        E = E[idx[0]]
 
-        return E
+        return E**(1/self.MPS1.L)
