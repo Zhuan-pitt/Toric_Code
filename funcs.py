@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib import pyplot
 import copy
 from scipy import linalg
-
+from scipy.sparse.linalg import LinearOperator
 
 def row_contract44(T1,T2):
     #T1,T2 4th order tensor
@@ -28,7 +28,12 @@ def row_contract23(T1,T2):
     T = np.tensordot(T1,T2,([1],[0]))
     return T
 
-
+def row_contract33(T1,T2):
+    #(0)-T1--T2-(1)
+    # (2)|   |(3)    
+    T = np.tensordot(T1,T2,([1],[0]))
+    T = np.transpose(T,[0,2,1,3])
+    return T
 
 def col_contract33(T1,T2):
     #T1,T2 3th order tensor   
@@ -77,6 +82,73 @@ def col_contract343(T1,T2,T3):
     return T
 
 
+def col_contract343_sparse(T1,T2,T3):
+    #T1,T2 3th order tensor   
+    #--T1--
+    #  |        
+    #--T2--   -->  --T-- (linear operator)
+    #  | 
+    #--T3--
+    bra = T1
+    ope = T2
+    ket = T3
+    
+    s1 = np.shape(bra) 
+    s2 = np.shape(ope) 
+    s3 = np.shape(ket) 
+    def mv(v):
+                V = np.reshape(v,[s1[1],s2[1],s3[1]])
+                M = np.tensordot(bra,V,([1],[0]))
+                M = np.tensordot(M,ope,([2,1],[1,2]))
+                M = np.tensordot(M,ket.conj(),([3,1],[2,1]))
+                    
+                return np.reshape(M,[s1[0]*s2[0]*s3[0],])
+    def vm(v):
+                V = np.reshape(v,[s1[0],s2[0],s3[0]])
+                M = np.tensordot(V,bra.conj(),([0],[0]))
+                M = np.tensordot(M,ope.conj(),([0,3],[0,2]))
+                M = np.tensordot(M,ket,([0,3],[0,2]))
+                    
+                return np.reshape(M,[s1[1]*s2[1]*s3[1],])
+                
+    tm = LinearOperator([s1[0]*s2[0]*s3[0],s1[1]*s2[1]*s3[1]],matvec = mv,rmatvec = vm)
+    return tm
+
+
+
+
+
+
+def col_contract33_sparse(T1,T3):
+    #T1,T2 3th order tensor   
+    #--T1--
+    #  |      -->  --T-- (linear operator)
+    #--T3--
+    bra = T1
+    ket = T3
+    
+    s1 = np.shape(bra) 
+    s3 = np.shape(ket) 
+    def mv(v):
+                V = np.reshape(v,[s1[1],s3[1]])
+                M = np.tensordot(bra,V,([1],[0]))
+                M = np.tensordot(M,ket.conj(),([1,2],[2,1]))
+                    
+                return np.reshape(M,[s1[0]*s3[0],])
+    def vm(v):
+                V = np.reshape(v,[s1[0],s3[0]])
+                M = np.tensordot(V,bra.conj(),([0],[0]))
+                M = np.tensordot(M,ket,([0,2],[0,2]))
+                    
+                return np.reshape(M,[s1[1]*s3[1],])
+                
+    tm = LinearOperator([s1[0]*s3[0],s1[1]*s3[1]],matvec = mv,rmatvec = vm)
+    return tm
+        
+
+
+        
+
 def sqrt_left_right(Ml,Mr,s,max_bond = 10,threshold=1e-10):
     #XX^dag = Mr
     #YY^dag = Ml
@@ -124,7 +196,7 @@ def sqrt_left_right(Ml,Mr,s,max_bond = 10,threshold=1e-10):
     #assert num>0, 'positive eigenvalue expected '+f"lam = {lamr} "
     return Y,X
 
-def sqrthm(A,threshold=1e-7):
+def sqrthm(A,threshold=1e-10,max_bond=1000):
     #sqrt of the hermitian matrix A
     #discard the eigenvalues that smaller than threshold
     #XX^dag = A
@@ -136,21 +208,24 @@ def sqrthm(A,threshold=1e-7):
         idx = lam.argsort()[::-1]
 
     
-    num = np.sum(lam[idx]>threshold)
-    #print(lam[idx],num)
-    sqrtlam = np.sqrt(lam[idx[0:num]])
-    X = vr[:,idx[:num]]@np.diag(sqrtlam)
-    assert num>0, 'positive eigenvalue expected '+f"lam = {lam} "
+    dim = np.sum(lam[idx]>threshold)
+    dim = min(dim,max_bond)
+    sqrtlam = np.sqrt(lam[idx[0:dim]])
+    X = vr[:,idx[:dim ]]@np.diag(sqrtlam)
+    assert dim >0, 'positive dimension expected '+f"lam = {lam} "
     return X
 
 
 def find_phase(M):
     s = M.shape
-    M_diag = max(np.diag(abs(M)))
+    for i in range(s[0]):
+        if abs((M[i,i])) > 1e-4:
+            theta = M[i,i]/abs(M[i,i])
+            return theta
     for i in range(s[0]):
         for j in range(i,s[1]):
-            if abs(M[i,j]) > 1e-5:
-                theta = (M[i,j]+M[j,i])
+            if abs(np.real(M[i,j])) > 1e-4:
+                theta = (M[i,j]/(M[j,i].conj()))**0.5
                 return theta
 def is_hermitian_upto_a_phase(M):
     
@@ -166,10 +241,18 @@ def is_hermitian_upto_a_phase(M):
     
     M = M/theta
     norm = np.linalg.norm(M-M.transpose().conj())
-    if norm*abs(theta)<1e-10:
+    
+    """N = M+M.transpose()
+    if np.linalg.norm(np.real(N))>=100*np.linalg.norm(np.imag(N)):
         return True
     else:
-        return False                
+        return False"""
+    
+    if norm*abs(theta)<1e-2*np.linalg.norm(M):
+        return True
+    else:
+        print([norm,abs(theta),norm*abs(theta)])
+        return False              
 
 
 def delta_tensor(N,m):
