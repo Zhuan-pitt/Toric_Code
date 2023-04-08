@@ -105,7 +105,7 @@ class iMPS(object):
                 f'not left canonical, error = {np.linalg.norm(V-V[0,0]*np.eye(self.chi[1%self.L]))}, site = {i}'
                 
         
-    def construct_from_tensor_list(self,tensor_list):
+    def construct_from_tensor_list(self,tensor_list,threshold = 1e-10, max_bond = 20):
         self.B=[]
         for i in range(len(tensor_list)):
                 self.B.append(tensor_list[i])
@@ -113,12 +113,13 @@ class iMPS(object):
         self.s = [None]*self.L
         self.chi = np.zeros(self.L,dtype = int)
         self.d = np.zeros(self.L,dtype = int)
+        self.svd_threshold=threshold
+        self.max_bond = max_bond
         for i in range(self.L):
             self.chi[i] = (self.B[i].shape)[0]
             self.d[i] = (self.B[i].shape)[2]
             self.s[i] = np.ones([self.chi[i],])
         self.init_norm = self.calculate_norm()
-        
         self.site_canonical(self.svd_threshold)
         self.dtype = self.B[0].dtype  
         
@@ -139,8 +140,7 @@ class iMPS(object):
         
     
     def clear_s(self):
-        for i in range(self.L):
-            self.s[i] = np.ones([self.chi[i],])
+        self.s[0] = np.ones([self.chi[0],])
             
     def construct_from_tensor_list_nocal(self,tensor_list):
         self.B=[]
@@ -254,7 +254,8 @@ class iMPS(object):
         assert isinstance(trans,linalg.LinearOperator), 'wrong type'
         shape = trans.shape
         if shape[0]>3:
-                lam,v = linalg.eigs(trans,2,v0 = np.ones([shape[1],]))
+                
+                lam,v = linalg.eigs(trans,2,v0 = np.ones([shape[0],]))
         else:
                 lam,v = scipy.linalg.eig(trans * np.identity(shape[0]))
             
@@ -299,8 +300,12 @@ class iMPS(object):
             
         s = s/np.linalg.norm(s)
         
-        self.B[0] = funcs.row_contract23(V@np.linalg.pinv(X),self.B[0])
-        self.B[-1] = funcs.row_contract32(self.B[-1], np.linalg.inv(s0)@np.linalg.pinv(Y.transpose().conj())@U@np.diag(s))
+        
+        B0 = funcs.row_contract23(V@np.linalg.pinv(X),self.B[0])
+        self.B[0] = B0
+        
+        B1 = funcs.row_contract32(self.B[-1], np.linalg.inv(s0)@np.linalg.pinv(Y.transpose().conj())@U@np.diag(s))
+        self.B[-1] = B1
             
          
         self.chi[0] = dim
@@ -309,27 +314,27 @@ class iMPS(object):
                 
     def site_canonical(self,threshold = 1e-12):
         """generating the canonical form for each site"""
+        self.clear_s()
         self.cell_canonical(threshold)
         
-        if self.L>=2:
-            """for i in range(self.L-2,-1,-1):
+        if self.L>=2:        
+            for i  in range(self.L-2,-1,-1):
+                #self.single_site_svd(i,'right',threshold =threshold )
+                self.two_site_svd(i)
+                self.check_consistency()
+                
+        """self.clear_s()
+        self.cell_canonical(threshold)
+        
+        if self.L>=2:        
+            for i  in range(self.L-2,-1,-1):
+                #self.single_site_svd(i,'right',threshold =threshold )
                 self.two_site_svd(i)
                 self.check_consistency()"""
                 
-            for i  in range(self.L-1,0,-1):
-                self.single_site_svd(i,'right',threshold =threshold )
-                self.check_consistency()
-                
-            for i  in range(0,1):
-                self.single_site_svd(i,'left',threshold )
-                self.check_consistency()  
-            
-            """for i  in range(self.L-1,0,-1):
-                self.single_site_svd(i,'right',threshold =threshold )
-                self.check_consistency()"""
         
         #self.clear_s()
-        self.cell_canonical(threshold)        
+        #self.cell_canonical(threshold)      
         
         
     def single_site_svd(self,site,direction = 'right',threshold = 1e-12):
@@ -390,7 +395,7 @@ class iMPS(object):
             site: int, site for the first tensor
         """
         #the iMPS is in right canonical form, therefore, self.s at i corresponds to the self.B at i-1
-        s0 = self.s[site]
+        s0 = np.diag(self.s[site])
         B1 = self.B[site]
         B2 = self.B[(site+1)%self.L]
         merg_tensor = np.tensordot(funcs.row_contract23(s0,B1),B2,([1],[0]))
@@ -398,8 +403,12 @@ class iMPS(object):
         merg_matrix = merg_tensor.reshape([self.chi[site]*self.d[site],self.chi[(site+2)%self.L]*self.d[(site+1)%self.L]])
         
         U,s,V = np.linalg.svd(merg_matrix)
+        dim = np.sum(s>self.svd_threshold)
+        dim = min(dim,self.max_bond)
+        s = s[:dim]
+        U = U[:,:dim]
+        V = V[:dim,:]
         
-        dim = len(s)
         V = V.reshape([dim,self.chi[(site+2)%self.L],self.d[(site+1)%self.L]])
         self.B[(site+1)%self.L] = V
         self.chi[(site+1)%self.L] = dim
@@ -407,7 +416,7 @@ class iMPS(object):
         U1 = (U@np.diag(s)).reshape([self.chi[site],self.d[site],dim])
         U1 = funcs.row_contract23(np.linalg.inv(s0),U1)
         self.B[site] = np.transpose(U1,[0,2,1])
-        self.s[(site+1)%self.L] = np.diag(s)
+        self.s[(site+1)%self.L] = s
 
 
     
@@ -533,20 +542,19 @@ class MPS_power_method(object):
         
         self.E_history = []
         
-    def update(self,loops):
+    def update(self,loops,threshold=1e-3):
         for _ in range(loops):
             for site in range(self.MPS.L):
                 B_new = funcs.col_contract34(self.MPS.B[site],self.MPO.B[site])
                 self.MPS.B[site] = B_new
                 self.MPS.chi[site] = B_new.shape[0]
-                #self.MPS.s[site] = np.diag(np.kron(np.diag(self.MPS.s[site]),np.eye(self.MPO.chi[site])))
                 self.MPS.s[site] = np.ones([self.MPS.chi[site],])
             self.E_history.append(self.MPS.calculate_norm())
             self.MPS.site_canonical(self.MPS.svd_threshold)
-            self.MPS.check_canonical_unit_cell()
+            
             self.MPS.check_consistency()
             #self.calculate_eig()
-            if self.check_converge():
+            if self.check_converge(threshold):
                 return 
             
     def check_converge(self,threshold=1e-3,loop=10):
@@ -609,6 +617,58 @@ class MPS_power_method_single(object):
             else: return False
         else: return False
  
+ 
+ 
+class MPS_power_method_twosite(object): 
+    """calculating the dominant eigenvector/eigenvalue of an MPO by using power method
+    Args:
+        Args:
+        L : int, length of the unit cell
+        max_bond: int, maximal bond dimension for each site
+
+    """
+    def __init__(self,MPS,MPO,max_bond):
+        MPS.max_bond = max_bond
+        self.MPS = MPS
+        self.MPS.site_canonical()
+        self.MPO = MPO
+        self.max_bond = max_bond
+        
+        self.E_history = []
+    
+    
+    def new_MPS_twosite(self,MPS1,loop=30):
+        #solve MPS2 = self.MPO@MPS1 by using two site update method
+        MPS_two_site = MPS_twosite_update2(MPS1,self.MPO,self.max_bond)
+        MPS_two_site.MPS2r = copy.deepcopy(MPS1)
+        MPS_two_site.init_MPS2()
+        
+        MPS_two_site.init_env()
+        MPS_two_site.update_MPS2(loop)
+        
+        return MPS_two_site.MPS2r
+        
+    def update(self,loops,threshold=1e-3):
+        self.MPS2 = copy.deepcopy(self.MPS)
+        for _ in range(loops):
+            
+            self.MPS2 = self.new_MPS_twosite(self.MPS2,loops)
+            
+            self.E_history.append(self.MPS2.calculate_norm())
+            self.MPS2.site_canonical(self.MPS2.svd_threshold)
+            
+            self.MPS2.check_consistency()
+            #self.calculate_eig()
+            if self.check_converge(threshold):
+                return 
+            
+    def check_converge(self,threshold=1e-3,loop=10):
+        if len(self.E_history)>loop+1:
+            E_average = np.mean(self.E_history[-loop-1:-1])
+            if abs(E_average-self.E_history[-1])<threshold:
+                return True
+            else: return False
+        else: return False
 
 class MPS_twosite_update(object):
     def __init__(self,MPS,MPO,max_bond):
@@ -635,9 +695,10 @@ class MPS_twosite_update(object):
             
             B[0,0] =(np.random.random([1,1,d])).reshape([d,])
             Bs.append(B)
-        
+        self.MPS2.svd_threshold =1e-10
+        self.MPS2.max_bond = self.max_bond
         self.MPS2.construct_from_tensor_list(Bs)
-        self.MPS2.svd_threshold =1e-12
+        
         self.MPS2.max_bond = self.max_bond
         self.MPS2.site_canonical()
     
@@ -871,10 +932,10 @@ class MPS_twosite_update2(object):
         self.El = [None]*self.L
         self.Er = [None]*self.L
         self.E_history = []
+        self.diff_list=[]
         
         
         
-        self.MPS2r = iMPS()
         Bs=[]
         np.random.seed(1)
         for site in range(self.L):
@@ -885,12 +946,13 @@ class MPS_twosite_update2(object):
             B[0,0] =(np.random.random([1,1,d])).reshape([d,])
             Bs.append(B)
         
+        self.MPS2r = iMPS()
+        self.MPS2r.svd_threshold = 1e-10
+        self.MPS2r.max_bond = self.max_bond
+        
         self.MPS2r.construct_from_tensor_list(Bs)
         
-        
-        
         self.svd_threshold =1e-12
-        self.MPS2r.max_bond = self.max_bond
         self.MPS2r.site_canonical()
     
         
@@ -924,6 +986,7 @@ class MPS_twosite_update2(object):
         if len(idx)>=2:
             assert lam[idx[0]] != lam[idx[1]], 'nondegenerate state expected'
         v = v[:,idx[0]]
+        v=v/v[0]   
         self.Er[0] = v/np.linalg.norm(v)
         
         trans = self.single_matrix(0,'sG')
@@ -939,13 +1002,12 @@ class MPS_twosite_update2(object):
         
         if len(idx)>=2:
             assert lam[idx[0]] != lam[idx[1]], 'nondegenerate state expected'
-        v = v[:,idx[0]]       
+        v = v[:,idx[0]]   
+        v=v/v[0]   
         self.El[0] = v.conj()/np.linalg.norm(v)
 
         
-        over = (np.dot(self.El[0].conj(),self.Er[0]))
-        phase = over/abs(over)
-        self.El[0] = self.El[0]*phase
+        
         
         for site in range(0,self.L-1):
             trans = self.single_matrix(site,order = 'sG')
@@ -954,7 +1016,6 @@ class MPS_twosite_update2(object):
         for site in range(self.L-1,0,-1):
             trans = self.single_matrix(site)    
             new_Er = trans.matvec(self.Er[(site+1)%self.L])
-            
             self.Er[site] = new_Er/np.linalg.norm(new_Er)
 
     
@@ -1002,11 +1063,11 @@ class MPS_twosite_update2(object):
 
         E_right = self.Er[(site+2)%self.L]
         E_left = self.El[site]
-        s1 = np.diag(self.MPS1r.s[(site+1)%self.L])
         
         Mr = np.reshape(E_right,[self.MPS1r.chi[(site+2)%self.L],self.MPO.chi[(site+2)%self.L],-1])
         Ml = np.reshape(E_left,[self.MPS1r.chi[site],self.MPO.chi[site],-1])
 
+        s1 = np.diag(self.MPS1r.s[(site+1)%self.L])
         Ml = np.tensordot(Ml,funcs.row_contract32(self.MPS1l.B[site],s1),([0],[0]))
         Ml = np.tensordot(Ml,self.MPO.B[site],([0,3],[0,2]))
         
@@ -1015,7 +1076,7 @@ class MPS_twosite_update2(object):
         Mr = np.tensordot(Mr,self.MPO.B[(site+1)%self.L],([0,3],[1,2]))
         
         new_M = np.tensordot(Ml,Mr,([1,2],[1,2]))
-        new_M = np.transpose(new_M.conj(),[0,2,1,3])
+        new_M = np.transpose(new_M,[0,2,1,3])
         return new_M
     
     
@@ -1024,14 +1085,6 @@ class MPS_twosite_update2(object):
         threshold = self.svd_threshold
         site = site%self.L
         new_M = self.new_tensor(site)
-        
-        """B0 = self.MPS2l.B[site]
-        B1= self.MPS2r.B[(site+1)%self.L]
-        s1 = np.diag(self.MPS2l.s[(site+1)%self.L])
-        old_M = funcs.row_contract33(funcs.row_contract32(B0,s1),B1)
-        
-        
-        new_M = new_M*0.3+old_M"""
         new_M = new_M/np.linalg.norm(new_M)
         
         new_M = np.transpose(new_M,[0,2,1,3])
@@ -1061,11 +1114,14 @@ class MPS_twosite_update2(object):
         # after updating the tensors at site and site+1
         trans = self.single_matrix(site,order = 'sG')
         new_El = (trans.rmatvec(self.El[site].conj())).conj()
+        new_El = new_El/new_El[0]
+        #new_El = new_El/np.linalg.norm(new_El)
         self.El[(site+1)%self.L] = new_El/np.linalg.norm(new_El)
         
         
         trans = self.single_matrix((site+1)%self.L)
         new_Er = trans.matvec(self.Er[(site+2)%self.L])
+        new_Er = new_Er/new_Er[0]
         self.Er[(site+1)%self.L] = new_Er/np.linalg.norm(new_Er)
         
 
@@ -1079,29 +1135,23 @@ class MPS_twosite_update2(object):
         self.MPS2l.s[(site+1)%self.L] = lam
         self.MPS2r.s[(site+1)%self.L] = lam
         
-        
-        
-        
         self.update_env(site)    
         
         
     
     def update_MPS2(self,loop=100):
-        self.overs.append( self.overlap(0))
-        self.cell_svd_update(0)
         for _ in range(loop):
-            
-            for site in range(1,self.L):
-                self.cell_svd_update(1)
-                
-            for site in range(self.L-2,-1,-1):
-                self.cell_svd_update(0)   
-                self.overs.append( self.overlap(0))    
-            if  self.check_list_converge(np.abs(self.overs)):
+            self.cell_svd_update(0)
+            self.cell_svd_update(1)
+            self.diff_list.append(self.difference())
+            if self.diff_list[-1]<=1e-6:
                 break
             
-        #self.MPS2.site_canonical()
-        #self.init_env()
+            if len(self.diff_list)>2:
+                if  self.diff_list[-1]<1e-5 and self.diff_list[-1]>self.diff_list[-2]:
+                    break
+        
+
 
         
     def overlap(self,site=0):
@@ -1111,6 +1161,18 @@ class MPS_twosite_update2(object):
         
         return over
     
+    def difference(self):
+        s1 =np.diag(self.MPS2r.s[1])
+
+        T1 = funcs.row_contract33(funcs.row_contract32(self.MPS2l.B[0],s1),self.MPS2r.B[1])
+        
+        T3 = self.new_tensor(0).conj()
+        if T1.shape == T3.shape:
+            return (np.linalg.norm(T1/T1[0,0,0,0]-T3/T3[0,0,0,0])/np.linalg.norm(T1/T1[0,0,0,0]))
+        else:
+            return 1000
+        
+
     def check_list_converge(self,over_list,threshold=1e-10):
         if len(over_list)>1:
             if abs(over_list[-1]-over_list[-2])<abs(threshold*over_list[-1]):
@@ -1126,6 +1188,8 @@ class MPS_twosite_update2(object):
             else: return False
         else: return False
         
+
+
 
 
 class MPS_singlesite_update(object):

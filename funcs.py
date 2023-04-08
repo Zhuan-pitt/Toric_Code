@@ -115,7 +115,12 @@ def col_contract343_sparse(T1,T2,T3):
     return tm
 
 
-
+def toreal(Tensor):
+    if np.linalg.norm(Tensor.imag)/np.linalg.norm(Tensor.real)<=1e-10:
+        
+        return Tensor - Tensor.imag*1j
+    else: 
+        return Tensor
 
 
 
