@@ -124,16 +124,9 @@ class iMPS(object):
         self.dtype = self.B[0].dtype  
         
         
-        attempts = 0
-        while attempts<10:
-            attempts += 1 
-            try:
-                self.check_canonical_unit_cell()
-                self.chcek_canonical_site()
-            except:
-                
-                self.site_canonical(self.svd_threshold)
-                continue
+        self.check_canonical_unit_cell()
+        self.chcek_canonical_site()
+
         
         
         self.check_consistency()        
@@ -549,13 +542,21 @@ class MPS_power_method(object):
                 self.MPS.B[site] = B_new
                 self.MPS.chi[site] = B_new.shape[0]
                 self.MPS.s[site] = np.ones([self.MPS.chi[site],])
-            self.E_history.append(self.MPS.calculate_norm())
+            
             self.MPS.site_canonical(self.MPS.svd_threshold)
+            self.update_lam()
+            
             
             self.MPS.check_consistency()
             #self.calculate_eig()
             if self.check_converge(threshold):
                 return 
+    
+    def update_lam(self):
+        strap1 = strap(self.MPS,self.MPO,self.MPS)
+        strap2 = strap(self.MPS,None,self.MPS)
+        
+        self.E_history.append(abs(strap1.calculate_eig())/abs(strap2.calculate_eig()))
             
     def check_converge(self,threshold=1e-3,loop=10):
         if len(self.E_history)>loop+1:
@@ -629,43 +630,49 @@ class MPS_power_method_twosite(object):
     """
     def __init__(self,MPS,MPO,max_bond):
         MPS.max_bond = max_bond
-        self.MPS = MPS
+        self.MPS = copy.deepcopy(MPS)
+        self.MPS2 =  copy.deepcopy(MPS)
         self.MPS.site_canonical()
         self.MPO = MPO
         self.max_bond = max_bond
-        
         self.E_history = []
     
     
-    def new_MPS_twosite(self,MPS1,loop=30):
+    def new_MPS_twosite(self,loop=30):
         #solve MPS2 = self.MPO@MPS1 by using two site update method
-        MPS_two_site = MPS_twosite_update2(MPS1,self.MPO,self.max_bond)
-        MPS_two_site.MPS2r = copy.deepcopy(MPS1)
-        MPS_two_site.init_MPS2()
-        
+        MPS_two_site = MPS_twosite_update2(self.MPS2,self.MPO,self.max_bond)
+        MPS_two_site.MPS2r = copy.deepcopy(self.MPS2)
+        MPS_two_site.init_MPS2()        
         MPS_two_site.init_env()
         MPS_two_site.update_MPS2(loop)
         
-        return MPS_two_site.MPS2r
+        self.MPS2 =  copy.deepcopy(MPS_two_site.MPS2r)
         
     def update(self,loops,threshold=1e-3):
-        self.MPS2 = copy.deepcopy(self.MPS)
         for _ in range(loops):
             
-            self.MPS2 = self.new_MPS_twosite(self.MPS2,loops)
+            self.new_MPS_twosite(loops)
             
-            self.E_history.append(self.MPS2.calculate_norm())
             self.MPS2.site_canonical(self.MPS2.svd_threshold)
             
             self.MPS2.check_consistency()
+            self.update_lam()
             #self.calculate_eig()
             if self.check_converge(threshold):
                 return 
+    
+    def update_lam(self):
+        strap1 = strap(self.MPS2,self.MPO,self.MPS2)
+        strap2 = strap(self.MPS2,None,self.MPS2)
+        
+        self.E_history.append(abs(strap1.calculate_eig())/abs(strap2.calculate_eig()))
+     
+    
             
     def check_converge(self,threshold=1e-3,loop=10):
         if len(self.E_history)>loop+1:
             E_average = np.mean(self.E_history[-loop-1:-1])
-            if abs(E_average-self.E_history[-1])<threshold:
+            if abs(E_average-self.E_history[-1])<threshold*E_average:
                 return True
             else: return False
         else: return False
@@ -853,18 +860,11 @@ class MPS_twosite_update(object):
         new_El = (trans.rmatvec(self.El[site].conj())).conj()
         self.El[(site+1)%self.L] = new_El/np.linalg.norm(new_El)
         
-        """trans = self.single_matrix((site+1)%self.L)
 
-        new_El = (trans.rmatvec(self.El[(site+1)%self.L].conj())).conj()
-        self.El[(site+2)%self.L] = new_El/np.linalg.norm(new_El)"""
-        
         trans = self.single_matrix((site+1)%self.L)
         new_Er = trans.matvec(self.Er[(site+2)%self.L])
         self.Er[(site+1)%self.L] = new_Er/np.linalg.norm(new_Er)
-        
-        """trans = self.single_matrix(site)
-        new_Er = trans.matvec(self.Er[(site+1)%self.L])
-        self.Er[site] = new_Er/np.linalg.norm(new_Er)"""
+
     
     def cell_svd_update(self,site):
         site = site%self.L
@@ -1144,7 +1144,7 @@ class MPS_twosite_update2(object):
             self.cell_svd_update(0)
             self.cell_svd_update(1)
             self.diff_list.append(self.difference())
-            if self.diff_list[-1]<=1e-6:
+            if self.diff_list[-1]<=1e-8:
                 break
             
             if len(self.diff_list)>2:

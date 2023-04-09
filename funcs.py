@@ -152,54 +152,11 @@ def col_contract33_sparse(T1,T3):
         
 
 
-        
-
-def sqrt_left_right(Ml,Mr,s,max_bond = 10,threshold=1e-10):
-    #XX^dag = Mr
-    #YY^dag = Ml
-    
-    #truncate X and Y based on s
-    # Y--s--X
-    # |     |
-    # Y--s--X
-    
-    lamr,vr = np.linalg.eigh(Mr)
-
-    idxr = lamr.argsort()[::-1]
-    if lamr[idxr[0]]<1e-10 and abs(lamr[idxr[-1]])>1e-10:
-        lamr,vr = np.linalg.eigh(-Mr)
-        idxr = lamr.argsort()[::-1]
-    
-    assert lamr[idxr[-1]]+1e-10 >0, f'{lamr[idxr]}'
-    lamr_sqrt = np.sqrt(abs(lamr[idxr]))
-    vr = vr[:,idxr]
-    
-    
-    laml,vl = np.linalg.eigh(Ml)
-    idxl = laml.argsort()[::-1]
-    if laml[idxl[0]]<1e-10 and abs(laml[idxl[-1]])>1e-10:
-        laml,vl = np.linalg.eigh(-Ml)
-        idxl = laml.argsort()[::-1]
-    
-    assert laml[idxl[-1]]+1e-10 >0, f'{laml[idxl]}'
-    
-    laml_sqrt = np.sqrt(abs(laml[idxl]))
-    vl = vl[:,idxr]
-    
-    Y = vl@np.diag(laml_sqrt)
-    X = vr@np.diag(lamr_sqrt)
-    M_target = Y.transpose().conj()@s@X
-    
-    for i in range(1,max_bond):
-        for j in range(1,max_bond):
-            M = np.zeros_like(M_target)
-            M[:i,:j]  = M_target[:i,:j]
-            if np.linalg.norm(M-M_target)<threshold:
-                return Y[:,:i],X[:,:j]
-    
-    
-    #assert num>0, 'positive eigenvalue expected '+f"lam = {lamr} "
-    return Y,X
+def entropy(s):
+    assert np.linalg.norm(s.imag)<1e-10, f'The Schmidt values should be real {s}'        
+    s = s/np.linalg.norm(s)
+    Sa  = -np.sum(s**2*np.log(s**2))
+    return Sa
 
 def sqrthm(A,threshold=1e-10,max_bond=1000):
     #sqrt of the hermitian matrix A
@@ -368,36 +325,38 @@ def single_trans_dephasing(p):
     return dA3
 
 
-def single_T_dephasing(p,u1="I",u2="I"):
-    
+
+def single_T_deamp(p):
     A = delta_tensor(4,2)
     
     P = np.zeros([2,2,2])
     P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
     
+    
     M = np.zeros([2,2,3])
-    M[:,:,0] = np.eye(2)*np.sqrt(1-p)
-    M[:,:,1] = np.array([[np.sqrt(p),0],[0,0]])
-    M[:,:,2] = np.array([[0,0],[0,np.sqrt(p)]])
+    M[:,:,0] = np.array([[1,0],[0,np.sqrt(1-p)]])
+    M[:,:,1] = np.array([[0,np.sqrt(p)],[0,0]])
     
     dM = np.tensordot(M,M,([1,2],[1,2]))
     
-    matrix_list={"I":np.eye(2),"X":np.matrix([[0,1],[1,0]])} 
-    u1 = matrix_list[u1]
-    u2 = matrix_list[u2]
+    ddM = np.kron(dM,dM)
+    ddM = ddM.reshape([4,4])
 
-    A3 = np.tensordot(P,A,([1],[0]))
-    A3 = np.transpose(A3,[1,0,2,3,4])
-    A3 = np.reshape(A3,[2,2,2,2,2])
-    A3 = np.tensordot(dM,A3,([1],[0]))
+    A3 = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
+    A3 = np.transpose(A3,[0,2,3,4,1,5])
+    A3 = np.reshape(A3,[2,2,2,2,4])
     
-    A31 = np.tensordot(A3,u1,([4],[0]))
-    A32 = np.tensordot(A3,u2,([4],[0]))
-    dA3 = np.tensordot(A31,A32,([0],[0]))
+    A3 = np.tensordot(A3,ddM,([4],[0]))
+ 
+
+    A3s = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
+    A3s = np.transpose(A3s,[0,2,3,4,1,5])
+    A3s = np.reshape(A3s,[2,2,2,2,4])
+    
+    dA3 = np.tensordot(A3,A3s,([4],[4]))
     dA3 = np.transpose(dA3,[0,4,1,5,2,6,3,7])
     dA3 = np.reshape(dA3,[4,4,4,4])
     return dA3
-
 
 def simplify_trans(T):
     s = T.shape
