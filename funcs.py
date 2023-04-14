@@ -290,38 +290,6 @@ def single_T(h1,h2,u1="I",u2="I"):
     return dA3
 
 
-def single_trans_dephasing(p):
-    
-    A = delta_tensor(4,2)
-    
-    P = np.zeros([2,2,2])
-    P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
-    
-    
-    M = np.zeros([2,2,3])
-    M[:,:,0] = np.eye(2)*np.sqrt(1-p)
-    M[:,:,1] = np.array([[np.sqrt(p),0],[0,0]])
-    M[:,:,2] = np.array([[0,0],[0,np.sqrt(p)]])
-    
-    dM = np.tensordot(M,M,([2],[2]))
-    
-    
-
-    A3 = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
-    A3 = np.transpose(A3,[0,2,3,4,1,5])
-    
-
-    
-    A3dM = np.tensordot(A3,dM,([5],[0]))
-    dA3dM = np.tensordot(A3,A3dM,([5],[6]))
-    dA3ddM = np.tensordot(dA3dM,dM,([4,9],[1,3]))
-
-    ddA3ddM = np.tensordot(dA3ddM,dA3ddM,([8,9,10,11],[9,8,11,10]))
-    
-    ddA3ddM = np.transpose(ddA3ddM,[0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15])
-    ddA3ddM = ddA3ddM.reshape([16,16,16,16])
-
-    return ddA3ddM
 
 def single_trans_qc(p,channel = 'dephasing'):
     """
@@ -333,28 +301,12 @@ def single_trans_qc(p,channel = 'dephasing'):
     Returns:
         _type_: single transfer tensor
     """
-    assert channel == 'dephasing' or channel == 'depolarizing' or channel == 'deamp', 'quantum channel should be dephasing, depolarizing or deamp' 
     A = delta_tensor(4,2)
     
     P = np.zeros([2,2,2])
     P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
     
-    if channel == 'dephasing':
-        M = np.zeros([2,2,3])
-        M[:,:,0] = np.eye(2)*np.sqrt(1-p)
-        M[:,:,1] = np.array([[np.sqrt(p),0],[0,0]])
-        M[:,:,2] = np.array([[0,0],[0,np.sqrt(p)]])
-    elif channel == 'depolarizing':
-        M = np.zeros([2,2,4],dtype = 'complex')        
-        M[:,:,0] = np.eye(2)*np.sqrt(1-p)
-        M[:,:,1] = np.sqrt(p/3) * np.array([[1,0],[0,-1]])
-        M[:,:,2] = np.sqrt(p/3) * np.array([[0,1],[1,0]])
-        M[:,:,3] = np.sqrt(p/3) * np.array([[0,-1j],[1j,0]])
-        
-    elif channel == 'deamp':
-        M = np.zeros([2,2,2])
-        M[:,:,0] =  np.array([[1,0],[0,np.sqrt(1-p)]])
-        M[:,:,1] = np.array([[0,np.sqrt(p)],[0,0]])
+    M = qc(p,channel)
     
     dM = np.tensordot(M,M.conj(),([2],[2]))
     
@@ -377,38 +329,142 @@ def single_trans_qc(p,channel = 'dephasing'):
     return ddA3ddM
 
 
+def qc(p,channel):
+    """return the single site quantum channel
 
-def single_T_deamp(p):
+    Args:
+        p (_type_): error rate
+    """
+    channel_list = ['dephasing','depolarizing','deamp',"x_flip",'z_flip']
+    assert channel in channel_list, f'quantum channel should be chosen from {channel_list}.' 
+    P = np.zeros([2,2,2])
+    P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
+    
+    if channel == 'dephasing':
+        M = np.zeros([2,2,3])
+        M[:,:,0] = np.eye(2)*np.sqrt(1-p)
+        M[:,:,1] = np.array([[np.sqrt(p),0],[0,0]])
+        M[:,:,2] = np.array([[0,0],[0,np.sqrt(p)]])
+    elif channel == 'depolarizing':
+        M = np.zeros([2,2,4],dtype = 'complex')        
+        M[:,:,0] = np.eye(2)*np.sqrt(1-p)
+        M[:,:,1] = np.sqrt(p/3) * np.array([[1,0],[0,-1]])
+        M[:,:,2] = np.sqrt(p/3) * np.array([[0,1],[1,0]])
+        M[:,:,3] = np.sqrt(p/3) * np.array([[0,-1j],[1j,0]])
+        
+    elif channel == 'deamp':
+        M = np.zeros([2,2,2])
+        M[:,:,0] =  np.array([[1,0],[0,np.sqrt(1-p)]])
+        M[:,:,1] = np.array([[0,np.sqrt(p)],[0,0]])
+    
+    elif channel == 'x_flip':
+        M = np.zeros([2,2,2])
+        M[:,:,0] =  np.array([[np.sqrt(1-p),0],[0,np.sqrt(1-p)]])
+        M[:,:,1] = np.array([[0,np.sqrt(p)],[np.sqrt(p),0]])
+        
+    elif channel == 'z_flip':
+        M = np.zeros([2,2,2])
+        M[:,:,0] =  np.array([[np.sqrt(1-p),0],[0,np.sqrt(1-p)]])
+        M[:,:,1] = np.array([[np.sqrt(p),0],[0,-np.sqrt(p)]])
+    
+    return M
+
+def single_trans_qc2(p1,p2,channel1 = 'dephasing',channel2 = 'deamp'):
+    """
+    Args:
+        p (_type_): error rate
+        channel (str, optional): quantum channel, including dephasing, depolarizing, deamp. 
+        Defaults to 'dephasing'.
+
+    Returns:
+        _type_: single transfer tensor
+    """
+    
     A = delta_tensor(4,2)
     
     P = np.zeros([2,2,2])
     P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
     
+    M1 = qc(p1,channel1)
+    M2 = qc(p2,channel2)
     
-    M = np.zeros([2,2,3])
-    M[:,:,0] = np.array([[1,0],[0,np.sqrt(1-p)]])
-    M[:,:,1] = np.array([[0,np.sqrt(p)],[0,0]])
+    dM1 = np.tensordot(M1,M1.conj(),([2],[2]))
+    dM2 = np.tensordot(M2,M2.conj(),([2],[2]))
     
-    dM = np.tensordot(M,M,([1,2],[1,2]))
-    
-    ddM = np.kron(dM,dM)
-    ddM = ddM.reshape([4,4])
+    dM = np.tensordot(dM2,dM1,([1,3],[0,2]))
+    dM = np.transpose(dM,([0,2,1,3]))
 
     A3 = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
     A3 = np.transpose(A3,[0,2,3,4,1,5])
-    A3 = np.reshape(A3,[2,2,2,2,4])
     
-    A3 = np.tensordot(A3,ddM,([4],[0]))
- 
 
-    A3s = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
-    A3s = np.transpose(A3s,[0,2,3,4,1,5])
-    A3s = np.reshape(A3s,[2,2,2,2,4])
     
-    dA3 = np.tensordot(A3,A3s,([4],[4]))
-    dA3 = np.transpose(dA3,[0,4,1,5,2,6,3,7])
-    dA3 = np.reshape(dA3,[4,4,4,4])
-    return dA3
+    A3dM = np.tensordot(A3,dM,([5],[1]))
+    dA3dM = np.tensordot(A3,A3dM,([5],[7]))
+    dA3ddM = np.tensordot(dA3dM,dM,([4,9],[1,3]))
+
+    ddA3ddM = np.tensordot(dA3ddM,dA3ddM,([8,9,10,11],[9,8,11,10]))
+    
+    ddA3ddM = np.transpose(ddA3ddM,[0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15])
+    ddA3ddM = ddA3ddM.reshape([16,16,16,16])
+
+    return ddA3ddM
+
+def single_trans_3layers(p,channel):
+    A = delta_tensor(4,2)
+    
+    P = np.zeros([2,2,2])
+    P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
+    
+    M = qc(p,channel)
+    
+    dM = np.tensordot(M,M.conj(),([2],[2]))
+    
+    
+
+    A3 = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
+    A3 = np.transpose(A3,[0,2,3,4,1,5])
+    
+
+    
+    A3dM = np.tensordot(A3,dM,([5],[1]))
+    dA3dM = np.tensordot(A3dM,A3,([7],[5]))
+    dA3ddM = np.tensordot(dA3dM,dM,([4,11],[1,3]))
+
+    ddA3ddM = np.tensordot(dA3ddM,dA3ddM,([5,11],[4,10]))
+    
+    dddA3ddM = np.tensordot(ddA3ddM,dA3ddM,([8,4,18,13],[11,5,10,4]))
+    
+    dddA3ddM = np.transpose(dddA3ddM,[0,4,8,12,16,20,1,5,9,13,17,21,2,6,10,14,18,22,3,7,11,15,19,23])
+    dddA3ddM = dddA3ddM.reshape([64,64,64,64])
+
+    return dddA3ddM
+
+def single_trans_pur(p,channel):
+    A = delta_tensor(4,2)
+    
+    P = np.zeros([2,2,2])
+    P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
+    
+    M = qc(p,channel)
+    M1 = qc(0,channel)
+    dM = np.tensordot(M,M1.conj(),([1,2],[1,2]))
+    
+    
+
+    A3 = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
+    A3 = np.transpose(A3,[0,2,3,4,1,5])
+    
+
+    
+    A3dM = np.tensordot(A3,dM,([5],[0]))
+    dA3dM = np.tensordot(A3,A3dM,([5],[5]))
+    dA3ddM = np.tensordot(dA3dM,dM,([4,9],[0,1]))
+
+    dA3ddM = dA3ddM.reshape([4,4,4,4])
+
+    return dA3ddM
+
 
 def simplify_trans(T):
     s = T.shape

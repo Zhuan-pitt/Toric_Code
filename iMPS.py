@@ -638,20 +638,22 @@ class MPS_power_method_twosite(object):
         self.E_history = []
     
     
-    def new_MPS_twosite(self,loop=30):
+    def new_MPS_twosite(self,loop=30,step=0,stack_threshold=1e-8):
         #solve MPS2 = self.MPO@MPS1 by using two site update method
         MPS_two_site = MPS_twosite_update2(self.MPS2,self.MPO,self.max_bond)
         MPS_two_site.MPS2r = copy.deepcopy(self.MPS2)
         MPS_two_site.init_MPS2()        
         MPS_two_site.init_env()
-        MPS_two_site.update_MPS2(loop)
-        
+        if step<=15:
+            MPS_two_site.update_MPS2(loop,threshold=stack_threshold**0.5,threshold2=0.1)
+        else:
+            MPS_two_site.update_MPS2(loop,threshold=stack_threshold,threshold2=stack_threshold**0.5)
         self.MPS2 =  copy.deepcopy(MPS_two_site.MPS2r)
         
-    def update(self,loops,threshold=1e-3):
-        for _ in range(loops):
+    def update(self,loops,threshold=1e-3,stack_threshold=1e-8):
+        for i in range(loops):
             
-            self.new_MPS_twosite(loops)
+            self.new_MPS_twosite(loops,i,stack_threshold)
             
             self.MPS2.site_canonical(self.MPS2.svd_threshold)
             
@@ -1139,16 +1141,16 @@ class MPS_twosite_update2(object):
         
         
     
-    def update_MPS2(self,loop=100):
+    def update_MPS2(self,loop=100,threshold=1e-8,threshold2=1e-5):
         for _ in range(loop):
             self.cell_svd_update(0)
             self.cell_svd_update(1)
             self.diff_list.append(self.difference())
-            if self.diff_list[-1]<=1e-8:
+            if self.diff_list[-1]<=threshold:
                 break
             
             if len(self.diff_list)>2:
-                if  self.diff_list[-1]<1e-5 and self.diff_list[-1]>self.diff_list[-2]:
+                if  self.diff_list[-1]<threshold2 and self.diff_list[-1]>self.diff_list[-2]:
                     break
         
 
