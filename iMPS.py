@@ -503,7 +503,18 @@ class strap(object):
                 
         return matrix
     
-    
+    def gram_matrix(self):
+        """return the right gram_matrix
+        """
+        trans = self.transfer_matrix()
+        if trans.shape[0]>2:
+            E,lam = linalg.eigs(trans,1,v0 = np.ones([trans.shape[1],]))
+        else:
+            E,lam = scipy.linalg.eig(trans * np.identity(trans.shape[0]))
+        idx = E.argsort()[::-1]
+        E = E[idx[0]]
+
+        return lam[:,idx[0]] 
     
     def calculate_eig(self):
         
@@ -650,7 +661,7 @@ class MPS_power_method_twosite(object):
             MPS_two_site.update_MPS2(loop,threshold=stack_threshold,threshold2=stack_threshold**0.5)
         self.MPS2 =  copy.deepcopy(MPS_two_site.MPS2r)
         
-    def update(self,loops,threshold=1e-3,stack_threshold=1e-8):
+    def update(self,loops,threshold=1e-3,stack_threshold=1e-7):
         for i in range(loops):
             
             self.new_MPS_twosite(loops,i,stack_threshold)
@@ -1168,9 +1179,24 @@ class MPS_twosite_update2(object):
 
         T1 = funcs.row_contract33(funcs.row_contract32(self.MPS2l.B[0],s1),self.MPS2r.B[1])
         
-        T3 = self.new_tensor(0).conj()
+        T3 = self.new_tensor(0)
+        
+        
+        
         if T1.shape == T3.shape:
-            return (np.linalg.norm(T1/T1[0,0,0,0]-T3/T3[0,0,0,0])/np.linalg.norm(T1/T1[0,0,0,0]))
+            T1 = T1.reshape([-1,])
+            T3 = T3.reshape([-1,])
+            
+            for i in range(len(T1)):
+                if abs(T1[i])>1e-5:
+                    T1 = T1/T1[i]
+                    T3 = T3/T3[i]
+                    break
+            T1 = T1/np.linalg.norm(T1)
+            T3 = T3/np.linalg.norm(T3)
+            
+            return (np.linalg.norm(T1-T3)/np.linalg.norm(T1))
+            #return (np.linalg.norm(T1/T1[0,0,0,0]-T3/T3[0,0,0,0])/np.linalg.norm(T1/T1[0,0,0,0]))
         else:
             return 1000
         
