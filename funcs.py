@@ -225,6 +225,7 @@ def delta_tensor(N,m):
         T[tuple([i]*N)] = 1
     return T
 
+
 def single_trans(h1,h2,u1="I",u2="I"):
     
     A = delta_tensor(4,2)
@@ -260,6 +261,111 @@ def single_trans(h1,h2,u1="I",u2="I"):
     dA3 = np.reshape(dA3,[4,4,4,4])
     return dA3
 
+def field(f):
+    if f =='X':
+        return np.array([[0,1],[1,0]])
+    if f=='Z':
+        return np.array([[1,0],[0,-1]])
+    if f=='I':
+        return np.array([[1,0],[0,1]])
+
+
+def single_trans_2layers_ff(h):
+    X = np.array([[0,1],[1,0]])
+    Z = np.array([[1,0],[0,-1]])
+    Id = np.eye(2)
+    A = delta_tensor(4,2)
+    
+    P = np.zeros([2,2,2])
+    P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
+    A3 = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
+    A3 = np.transpose(A3,[0,2,3,4,1,5])
+    A3 = np.reshape(A3,[2,2,2,2,4])
+    
+    dA3 = np.tensordot(A3,A3,axes=0)
+    dA3 = np.transpose(dA3,[0,1,2,3,5,6,7,8,4,9])
+    dA3 = np.reshape(dA3,[2,2,2,2,2,2,2,2,16])
+    
+    M = linalg.expm(h/2*np.kron(X@Z,np.kron(X@Z,np.kron(X@Z,X@Z))))
+    
+    #M=M@linalg.expm(h/2*np.kron(Z,np.kron(X,np.kron(Z,X))))
+    
+    dA3M = np.tensordot(dA3,M,([8],[0]))
+    ddA3dM = np.tensordot(dA3M,dA3M,([8],[8]))
+    ddA3dM=np.transpose(ddA3dM,[0,4,12,8,1,5,13,9,2,6,14,10,3,7,15,11])
+    ddA3dM = ddA3dM.reshape([16]*4)
+    return ddA3dM
+    """X = np.array([[0,1],[1,0]])
+    Z = np.array([[1,0],[0,-1]])
+    A = delta_tensor(4,2)
+    
+    P = np.zeros([2,2,2])
+    P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
+    
+    
+    
+    M = linalg.expm(np.kron(X@Z,Z@X)*h/2)
+    
+    M = M.reshape([2,2,2,2])
+
+    
+    A3 = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
+    A3 = np.transpose(A3,[0,2,3,4,1,5])
+
+    
+    dA3 = np.tensordot(A3,A3,axes=0)
+    
+    dA3M = np.tensordot(dA3,M,([5,11],[0,1]))
+    
+    dA3dM = np.tensordot(dA3M,M,([4,9],[0,1]))
+   
+    ddA3dM = np.tensordot(dA3dM,dA3dM,([8,9,10,11],[8,9,10,11]))
+   
+    
+    ddA3dM=np.transpose(ddA3dM,[0,4,12,8,1,5,13,9,2,6,14,10,3,7,15,11])
+    
+    ddA3dM = ddA3dM.reshape([16]*4)"""
+    
+
+    #return ddA3dM
+
+def single_trans_2layers_df(h,f1="X",f2="Z",perm = True):
+    #double field
+    A = delta_tensor(4,2)
+    
+    P = np.zeros([2,2,2])
+    P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
+    
+    
+    
+    M = linalg.expm(np.kron(field(f1),field(f2))*h/2)
+    
+    M = M.reshape([2,2,2,2])
+
+    
+    A3 = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
+    A3 = np.transpose(A3,[0,2,3,4,1,5])
+
+    
+    dA3 = np.tensordot(A3,A3,axes=0)
+    
+    dA3M = np.tensordot(dA3,M,([5,11],[0,1]))
+    
+    dA3dM = np.tensordot(dA3M,M,([4,9],[0,1]))
+   
+    ddA3dM = np.tensordot(dA3dM,dA3dM,([8,9,10,11],[8,9,10,11]))
+   
+    
+    if perm:
+        ddA3dM=np.transpose(ddA3dM,[0,7,15,8,1,6,14,9,2,4,12,10,3,5,13,11])
+    else:
+        ddA3dM=np.transpose(ddA3dM,[0,4,12,8,1,5,13,9,2,6,14,10,3,7,15,11])
+    
+    ddA3dM = ddA3dM.reshape([16]*4)
+    
+
+    return ddA3dM
+    
 
 def single_trans_1layer(p,channel = 'dephasing',site_operator = np.array([[0,1],[1,0]])):
     """
@@ -341,7 +447,7 @@ def qc(p,channel):
     Args:
         p (_type_): error rate
     """
-    channel_list = ['dephasing','depolarizing','deamp',"x_flip",'y_flip','z_flip']
+    channel_list = ['dephasing','depolarizing','deamp',"x_flip",'z_flip','xzf_flip']
     assert channel in channel_list, f'quantum channel should be chosen from {channel_list}.' 
     P = np.zeros([2,2,2])
     P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
@@ -376,7 +482,15 @@ def qc(p,channel):
     elif channel == 'y_flip':
         M = np.zeros([2,2,2],dtype='complex')
         M[:,:,0] =  np.array([[np.sqrt(1-p),0],[0,np.sqrt(1-p)]],dtype='complex')
-        M[:,:,1] = np.array([[0,-1j*np.sqrt(p)],[1j*np.sqrt(p),0]],dtype='complex')
+        M[:,:,1] = np.array([[0,-1*np.sqrt(p)],[1*np.sqrt(p),0]],dtype='complex')
+        
+    elif channel == 'xzf_flip':
+        M = np.zeros([4,4,2],dtype='complex')
+        M[:,:,0] =  np.sqrt(1-p)*np.array(np.kron(np.eye(2),np.eye(2)),dtype='complex')
+        M[:,:,1] =  np.sqrt(p)*np.array(np.kron(np.array([[1,0],[0,1]],dtype='complex'),np.array([[1,0],[0,-1]],dtype='complex')))
+        #M[:,:,2] =  np.sqrt(p/2)*np.array(np.kron(np.array([[0,1],[1,0]],dtype='complex'),np.array([[0,1],[1,0]],dtype='complex')))
+        #M[:,:,3] =  np.sqrt(p*(1-p))*np.array(np.kron(np.eye(2,dtype='complex'),np.array([[1,0],[0,-1]],dtype='complex')))
+        #M[:,:,2] =  np.sqrt(p/2)*np.kron(np.array(np.array([[1,0],[0,-1]],dtype='complex')),np.array([[0,1],[1,0]],dtype='complex'))
     
     return M
 
@@ -436,6 +550,105 @@ def single_trans_2layers(p1,p2,channel1 = 'dephasing',channel2 = 'deamp'):
     
     P = np.zeros([2,2,2])
     P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
+    A3 = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
+    A3 = np.transpose(A3,[0,2,3,4,1,5])
+    
+    
+    
+    if channel1 != 'xzf_flip' and channel1 != 'test':
+        M1 = qc(p1,channel1)
+        dM1 = np.tensordot(M1,M1.conj(),([2],[2]))
+        A3dM1 = np.tensordot(A3,dM1,([5],[1]))
+        dA3dM1 = np.tensordot(A3dM1,A3,([7],[5]))
+        dA3ddM1 = np.tensordot(dA3dM1,dM1,([4,11],[1,3]))
+    if channel1 == 'xzf_flip':
+        M1 = qc(p1,channel1)
+        dM1 = np.tensordot(M1,M1.conj(),([2],[2]))
+        A31 = A3.reshape([2,2,2,2,4])
+        A3dM1 = np.tensordot(A31,dM1,([4],[1]))
+        dA3dM1 = np.tensordot(A3dM1,A31,([6],[4]))
+        #dA3dM1 = dA3dM1.reshape([2]*12)
+        #dA3ddM1 = dA3dM1.transpose([0,1,2,3,4,6,8,9,10,11,5,7])
+    if channel1 == 'test':    
+        M1 = qc(0,'x_flip')
+        dM1 = np.tensordot(M1,M1.conj(),([2],[2]))
+        A3dM1 = np.tensordot(A3,dM1,([5],[1]))
+        dA3dM1 = np.tensordot(A3dM1,A3,([7],[5]))
+        M1 = qc(p1,'x_flip')
+        dM1 = np.tensordot(M1,M1.conj(),([2],[2]))
+        dA3ddM1 = np.tensordot(dA3dM1,dM1,([4,11],[1,3]))
+        
+    
+    
+    if channel2 != 'xzf_flip' and channel2 != 'test' :
+        M2 = qc(p2,channel2)
+        dM2 = np.tensordot(M2,M2.conj(),([2],[2]))
+        A3dM2 = np.tensordot(A3,dM2,([5],[1]))
+        dA3dM2 = np.tensordot(A3dM2,A3,([7],[5]))
+        dA3ddM2 = np.tensordot(dA3dM2,dM2,([4,11],[1,3]))
+        ddA3ddM = np.tensordot(dA3ddM1,dA3ddM2,([10,4,11,5],[11,5,10,4]))
+    if channel2 == 'xzf_flip':
+        M2 = qc(p2,channel2)
+        dM2 = np.tensordot(M2,M2.conj(),([2],[2]))
+        A31 = A3.reshape([2,2,2,2,4])
+        A3dM2 = np.tensordot(A31,dM2,([4],[1]))
+        dA3dM2 = np.tensordot(A3dM2,A31,([6],[4]))
+        #dA3dM2 = dA3dM2.reshape([2]*12)
+        #dA3ddM2 = dA3dM2.transpose([0,1,2,3,4,6,8,9,10,11,5,7])
+        ddA3ddM = np.tensordot(dA3dM1,dA3dM2,([4,5],[5,4]))
+    
+    
+    if channel2 == 'test':    
+        M2 = qc(0,'x_flip')
+        dM2 = np.tensordot(M2,M2.conj(),([2],[2]))
+        A3dM2 = np.tensordot(A3,dM2,([5],[1]))
+        dA3dM2 = np.tensordot(A3dM2,A3,([7],[5]))
+        M2 = qc(p2,'x_flip')
+        dM2 = np.tensordot(M2,M2.conj(),([2],[2]))
+        dA3ddM2 = np.tensordot(dA3dM2,dM2,([4,11],[1,3]))
+        ddA3ddM = np.tensordot(dA3ddM1,dA3ddM2,([10,4,11,5],[11,5,10,4]))
+    #ddA3ddM = np.tensordot(dA3ddM1,dA3ddM2,([10,4,11,5],[11,5,10,4]))
+    
+    
+    
+    ddA3ddM = np.transpose(ddA3ddM,[0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15])
+    ddA3ddM = ddA3ddM.reshape([16,16,16,16])
+
+    return ddA3ddM
+
+
+def single_trans_2layers_proj(p1,p2,channel1 = 'dephasing',channel2 = 'deamp'):
+    """
+    Args:
+        p (_type_): error rate
+        channel (str, optional): quantum channel, including dephasing, depolarizing, deamp. 
+        Defaults to 'dephasing'.
+
+    Returns:
+        _type_: single transfer tensor
+    """
+    
+    E = np.zeros([2,2,2,2,2])
+    E[0,0,0,0,0] = 1/2 
+    E[1,1,1,1,0] = 1/2
+    E[0,0,0,0,1] = 1/2
+    E[1,1,1,1,1] = -1/2
+    
+    c = np.zeros([2,2,2])
+    c[0,:,:] = np.eye(2)
+    c[1,:,:] = np.array([[0,1],[1,0]])
+    
+    
+    C = np.tensordot(c,c,([2],[1]))
+    C = np.transpose(C,[0,2,1,3])
+    
+    EC = np.tensordot(C,E,([1],[0]))
+    ECC = np.tensordot(EC,C,([5],[1]))
+    
+    A = delta_tensor(4,2)
+    
+    P = np.zeros([2,2,2])
+    P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
     
     M1 = qc(p1,channel1)
     M2 = qc(p2,channel2)
@@ -457,15 +670,79 @@ def single_trans_2layers(p1,p2,channel1 = 'dephasing',channel2 = 'deamp'):
     dA3dM2 = np.tensordot(A3dM2,A3,([7],[5]))
     dA3ddM2 = np.tensordot(dA3dM2,dM2,([4,11],[1,3]))
 
+    dA3ddM2ECC  = np.tensordot(dA3ddM2,ECC,([11,5],[1,7]))
     
-    ddA3ddM = np.tensordot(dA3ddM1,dA3ddM2,([10,4,11,5],[11,5,10,4]))
+    dA3ddM2dECC  = np.tensordot(dA3ddM2ECC,ECC,([9,4,14],[2,8,5]))
+    
+    
+    ddA3ddMdECC = np.tensordot(dA3ddM1,dA3ddM2dECC ,([10,4,11,5],[9,13,15,19]))
     
     
     
-    ddA3ddM = np.transpose(ddA3ddM,[0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15])
-    ddA3ddM = ddA3ddM.reshape([16,16,16,16])
+    ddA3ddMdECC = np.transpose(ddA3ddMdECC,[0,4,8,12,16,20,1,5,9,13,17,21,2,6,10,14,18,22,3,7,11,15,19,23])
+    
+    #ddA3ddMdECC = np.transpose(ddA3ddMdECC,[0,4,20,8,12,16,1,5,21,9,13,17,2,6,22,10,14,18,3,7,23,11,15,19])
+    
+    ddA3ddMdECC = ddA3ddMdECC.reshape([64,64,64,64])
+    
+    return ddA3ddMdECC
 
-    return ddA3ddM
+
+
+def single_trans_1layer_proj(p1,channel1 = 'dephasing'):
+    """
+    Args:
+        p (_type_): error rate
+        channel (str, optional): quantum channel, including dephasing, depolarizing, deamp. 
+        Defaults to 'dephasing'.
+
+    Returns:
+        _type_: single transfer tensor
+    """
+    
+    E = np.zeros([2,2,2,2,2])
+    E[0,0,0,0,0] = 1/2 
+    E[1,1,1,1,0] = 1/2
+    E[0,0,0,0,1] = 1/2
+    E[1,1,1,1,1] = -1/2
+    
+    c = np.zeros([2,2,2])
+    c[0,:,:] = np.eye(2)
+    c[1,:,:] = np.array([[0,1],[1,0]])
+    
+    
+    C = np.tensordot(c,c,([2],[1]))
+    C = np.transpose(C,[0,2,1,3])
+    
+    EC = np.tensordot(C,E,([1],[0]))
+    ECC = np.tensordot(EC,C,([5],[1]))
+    
+    A = delta_tensor(4,2)
+    
+    P = np.zeros([2,2,2])
+    P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
+    
+    M1 = qc(p1,channel1)
+    
+    dM1 = np.tensordot(M1,M1.conj(),([2],[2]))
+    
+
+    A3 = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
+    A3 = np.transpose(A3,[0,2,3,4,1,5])
+    
+
+    
+    A3dM1 = np.tensordot(A3,dM1,([5],[1]))
+    dA3dM1 = np.tensordot(A3dM1,A3,([7],[5]))
+    dA3ddM1 = np.tensordot(dA3dM1,dM1,([4,11],[1,3]))
+
+    dA3ddM1ECC  = np.tensordot(dA3ddM1,ECC,([5,11],[1,7]))
+    
+    dA3ddM1dECC  = np.tensordot(dA3ddM1ECC,ECC,([4,9,14,11,16],[2,8,5,1,6]))
+    
+    dA3ddM1dECC = dA3ddM1dECC.transpose([0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15])
+    dA3ddM1dECC = dA3ddM1dECC.reshape([16,16,16,16])
+    return dA3ddM1dECC
 
 
 def single_trans_3layers(p1,channel1,p2,channel2,p3,channel3):
@@ -511,27 +788,28 @@ def single_trans_3layers(p1,channel1,p2,channel2,p3,channel3):
 
     return dddA3ddM123
 
-def single_trans_2layers_swap(p1,p2,channel = 'x_flip'):
-    """
-    Args:
-        p (_type_): error rate
-        channel (str, optional): quantum channel, including dephasing, depolarizing, deamp. 
-        Defaults to 'dephasing'.
-
-    Returns:
-        _type_: single transfer tensor
-    """
-    
+def single_trans_3layers_test(p1,channel1,p2,channel2,p3,channel3):
     A = delta_tensor(4,2)
     
     P = np.zeros([2,2,2])
     P[0,0,0],P[1,1,0],P[0,1,1],P[1,0,1]=1,1,1,1
     
-    M1 = qc(p1,channel)
-    M2 = qc(p2,channel)
+    M1 = qc(p1,channel1)
+    M2 = qc(p2,channel2)
+    M3 = qc(p3,channel3)
     
-    dM1 = np.tensordot(M1,M2.conj(),([2],[2]))
-    dM2 = np.tensordot(M2,M1.conj(),([2],[2]))
+    dM1 = np.tensordot(M1,M1.conj(),([2],[2]))
+    M11 = qc(p1,'z_flip')
+    dM11 = np.tensordot(M11,M11.conj(),([2],[2]))
+    
+    dM1 = np.tensordot(dM11,dM1,([1,3],[0,2]))
+    dM1 = dM1.transpose([0,2,1,3])
+    
+    dM2 = np.tensordot(M2,M2.conj(),([2],[2]))
+    dM3 = np.tensordot(M3,M3.conj(),([2],[2]))
+
+    dM2 = dM1
+    dM3 = dM1
     
 
     A3 = np.tensordot(np.tensordot(P,A,([1],[0])),P,([4],[0]))
@@ -542,18 +820,21 @@ def single_trans_2layers_swap(p1,p2,channel = 'x_flip'):
     A3dM1 = np.tensordot(A3,dM1,([5],[1]))
     dA3dM1 = np.tensordot(A3dM1,A3,([7],[5]))
     dA3ddM1 = np.tensordot(dA3dM1,dM1,([4,11],[1,3]))
-
+    
     A3dM2 = np.tensordot(A3,dM2,([5],[1]))
     dA3dM2 = np.tensordot(A3dM2,A3,([7],[5]))
     dA3ddM2 = np.tensordot(dA3dM2,dM2,([4,11],[1,3]))
+    
+    A3dM3 = np.tensordot(A3,dM3,([5],[1]))
+    dA3dM3 = np.tensordot(A3dM3,A3,([7],[5]))
+    dA3ddM3 = np.tensordot(dA3dM3,dM3,([4,11],[1,3]))
 
+    ddA3ddM12 = np.tensordot(dA3ddM1,dA3ddM2,([5,11],[4,10]))
     
-    ddA3ddM = np.tensordot(dA3ddM1,dA3ddM2,([10,4,11,5],[11,5,10,4]))
+    dddA3ddM123 = np.tensordot(ddA3ddM12,dA3ddM3,([9,4,19,14],[11,5,10,4]))
     
-    
-    
-    ddA3ddM = np.transpose(ddA3ddM,[0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15])
-    ddA3ddM = ddA3ddM.reshape([16,16,16,16])
+    dddA3ddM123 = np.transpose(dddA3ddM123,[0,4,8,12,16,20,1,5,9,13,17,21,2,6,10,14,18,22,3,7,11,15,19,23])
+    dddA3ddM123 = dddA3ddM123.reshape([64,64,64,64])
 
-    return ddA3ddM
+    return dddA3ddM123
 

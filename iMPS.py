@@ -479,6 +479,7 @@ class strap(object):
         else:
             self.MPO = copy.deepcopy(MPO)
         self.MPS2 = copy.deepcopy(MPS2)
+        self.MPS1.site_canonical()
         self.MPS2.site_canonical()
         self.check_consistency()
         
